@@ -1,0 +1,24 @@
+[package]
+name = "daox"
+version = "0.1.0"
+edition = "2021"
+description = "Générateur DAO Database-first orienté performance extrême"
+
+[dependencies]
+# Pour l'introspection (connexion à MySQL/MariaDB en premier, Postgres inclus pour la suite)
+sqlx = { version = "0.8", features = [
+    "mysql",
+    "postgres",
+    "runtime-tokio-rustls",
+] }
+tokio = { version = "1", features = ["full"] }
+
+# Pour générer l'arbre syntaxique (AST) du code Rust final proprement
+quote = "1.0"
+proc-macro2 = "1.0"
+
+# Pour la conversion des noms (ex: snake_case -> PascalCase pour les structs)
+heck = "0.5"
+
+# Gestion propre des erreurs
+anyhow = "1.0"

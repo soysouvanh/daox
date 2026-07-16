@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "daox",
+    "daox-test"
+]
+resolver = "2"
