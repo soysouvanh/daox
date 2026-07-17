@@ -1,4 +1,4 @@
-// Code généré automatiquement par daox. NE PAS MODIFIER.
+// Code generated automatically by daox. DO NOT EDIT.
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ActiveUsers {
@@ -9,21 +9,32 @@ pub struct ActiveUsers {
 }
 
 impl ActiveUsers {
-    /// Compte le nombre total de lignes.
+    /// Counts the total number of rows in the table.
+    /// 
+    /// **Note:** On large tables, `COUNT(*)` can be slow. Use it thoughtfully.
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM active_users";
         let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
         Ok(count as u64)
     }
 
-    /// Flux asynchrone (Stream) zéro-allocation sur toute la table.
+    /// Creates a zero-allocation Asynchronous Stream over the entire table.
+    /// 
+    /// **Performance:** This is the absolute best way to process millions of rows.
+    /// Instead of loading all rows into RAM (which would cause out-of-memory crashes),
+    /// the Stream fetches and yields rows one by one directly from the database connection.
     pub fn stream_all<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres> + 'e>(executor: E) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
         let query = "SELECT * FROM active_users";
         sqlx::query_as::<_, Self>(query).fetch(executor)
     }
 
-    /// Pagination par numéro de page et tri dynamique (Offset/Limit).
-    /// Attention: order_by n'est pas bindé, à valider en amont contre l'injection SQL.
+    /// Classic Offset/Limit pagination with dynamic sorting.
+    /// 
+    /// **SECURITY WARNING:** The `order_by` parameter is NOT bound via prepared statements 
+    /// (SQL does not allow binding column names). You MUST strictly whitelist the user input 
+    /// before passing it here to prevent SQL Injection!
+    /// 
+    /// **Performance:** Offset pagination becomes very slow on deep pages. Consider `list_by_cursor` instead.
     pub async fn list_paginated<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, order_by: &str, page: u32, page_size: u32) -> sqlx::Result<Vec<Self>> {
         let offset = page.saturating_sub(1) * page_size;
         let query = format!("SELECT * FROM active_users ORDER BY {} LIMIT $1 OFFSET $2", order_by);

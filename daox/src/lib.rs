@@ -168,7 +168,7 @@ impl DaoxGenerator {
 
             // Construction du code Rust pour la structure (Model)
             let mut code = String::new();
-            code.push_str("// Code généré automatiquement par daox. NE PAS MODIFIER.\n\n");
+            code.push_str("// Code generated automatically by daox. DO NOT EDIT.\n\n");
             code.push_str("#[derive(Debug, Clone, sqlx::FromRow)]\n");
             code.push_str(&format!("pub struct {} {{\n", struct_name));
 
@@ -447,7 +447,12 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
     }
 
     // 1. --- INSERT ---
-    code.push_str("    /// Insère la ligne en base de données. Retourne l'ID généré (ou 0).\n");
+    code.push_str("    /// Inserts the current record into the database.\n");
+    code.push_str("    /// \n");
+    code.push_str("    /// **Best Practice:** Use this method when you want to create a brand new row.\n");
+    code.push_str("    /// If the table has an auto-increment primary key, the database will generate the ID automatically.\n");
+    code.push_str("    /// \n");
+    code.push_str("    /// Returns the generated ID (or 0 if the table doesn't have an auto-increment ID).\n");
     code.push_str(&format!("    pub async fn insert<'e, E: sqlx::Executor<'e, Database = {}>>(&self, executor: E) -> sqlx::Result<u64> {{\n", dialect.db_type()));
     
     let is_numeric_pk = pk_col.map_or(false, |pk| {
@@ -483,7 +488,13 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
     }
 
     // 2. --- INSERT BATCH ---
-    code.push_str("    /// Insère de multiples lignes en une seule requête réseau (Batch).\n");
+    code.push_str("    /// Inserts multiple records in a single network round-trip (Batch Insert).\n");
+    code.push_str("    /// \n");
+    code.push_str("    /// **Performance:** This is heavily optimized. Instead of running 100 individual `INSERT` queries,\n");
+    code.push_str("    /// this method groups them into one massive `INSERT INTO ... VALUES (...), (...), ...` query.\n");
+    code.push_str("    /// Always prefer this method over looping with `.insert()` when saving large amounts of data.\n");
+    code.push_str("    /// \n");
+    code.push_str("    /// Returns the number of rows successfully inserted.\n");
     code.push_str(&format!("    pub async fn insert_batch<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, items: &[Self]) -> sqlx::Result<u64> {{\n", dialect.db_type()));
     code.push_str("        if items.is_empty() { return Ok(0); }\n");
     code.push_str(&format!("        let mut query_builder: sqlx::QueryBuilder<{}> = sqlx::QueryBuilder::new(\"INSERT INTO {} ({}) \");\n", dialect.db_type(), table.name, col_names));
@@ -495,7 +506,14 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
     code.push_str("        });\n        let result = query_builder.build().execute(executor).await?;\n        Ok(result.rows_affected())\n    }\n\n");
 
     // 3. --- UPSERT ---
-    code.push_str("    /// Insère ou met à jour la ligne si une contrainte d'unicité est violée (Upsert).\n");
+    code.push_str("    /// Inserts the record, or updates it if a unique constraint is violated (Upsert).\n");
+    code.push_str("    /// \n");
+    code.push_str("    /// **How it works:** \n");
+    code.push_str("    /// 1. The database attempts to insert the row.\n");
+    code.push_str("    /// 2. If a collision occurs (e.g., an email already exists in a UNIQUE index),\n");
+    code.push_str("    ///    it automatically updates the existing row with the new data instead of crashing.\n");
+    code.push_str("    /// \n");
+    code.push_str("    /// This is highly recommended for data synchronization tasks.\n");
     code.push_str(&format!("    pub async fn upsert<'e, E: sqlx::Executor<'e, Database = {}>>(&self, executor: E) -> sqlx::Result<u64> {{\n", dialect.db_type()));
     
     let mut conflict_cols = Vec::new();
@@ -545,7 +563,11 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
         let pk_where = pk_cols.iter().enumerate().map(|(i, c)| format!("{} = {}", dialect.escape_sql_col(&c.name), dialect.ph(update_cols.len() + i + 1))).collect::<Vec<_>>().join(" AND ");
 
         // 4. --- UPDATE BY PK ---
-        code.push_str("    /// Met à jour la ligne entière via sa clé primaire.\n");
+        code.push_str("    /// Overwrites the entire record in the database using its Primary Key.\n");
+        code.push_str("    /// \n");
+        code.push_str("    /// **Warning:** This will update ALL columns in the row with the values in the current struct.\n");
+        code.push_str("    /// If you only want to update one or two specific columns, use `update_partial_by_pk` instead \n");
+        code.push_str("    /// to save network bandwidth and database disk I/O.\n");
         code.push_str(&format!("    pub async fn update_by_pk<'e, E: sqlx::Executor<'e, Database = {}>>(&self, executor: E) -> sqlx::Result<u64> {{\n", dialect.db_type()));
         code.push_str(&format!("        let query = \"UPDATE {} SET {} WHERE {}\";\n", table.name, set_clauses, pk_where));
         code.push_str("        let result = sqlx::query(&query)\n");
@@ -561,7 +583,9 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
 
         // 5. --- DELETE BY PK ---
         let pk_where_del = pk_cols.iter().enumerate().map(|(i, c)| format!("{} = {}", dialect.escape_sql_col(&c.name), dialect.ph(i + 1))).collect::<Vec<_>>().join(" AND ");
-        code.push_str("    /// Supprime la ligne via sa clé primaire.\n");
+        code.push_str("    /// Deletes the specific record from the database using its Primary Key.\n");
+        code.push_str("    /// \n");
+        code.push_str("    /// Returns the number of affected rows (1 if deleted, 0 if it didn't exist).\n");
         code.push_str(&format!("    pub async fn delete_by_pk<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, {}) -> sqlx::Result<u64> {{\n", dialect.db_type(), pk_args));
         code.push_str(&format!("        let query = \"DELETE FROM {} WHERE {}\";\n", table.name, pk_where_del));
         code.push_str("        let result = sqlx::query(&query)\n");
@@ -576,7 +600,10 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
             let pk = pk_cols[0];
             let pk_rust_type = map_sql_type(&pk.data_type, pk.is_nullable, dialect);
             
-            code.push_str("    /// Supprime de multiples lignes via leurs clés primaires (Batch).\n");
+            code.push_str("    /// Deletes multiple records in a single query using an `IN (...)` clause.\n");
+            code.push_str("    /// \n");
+            code.push_str("    /// **Performance:** This is the most efficient way to delete a batch of specific IDs.\n");
+            code.push_str("    /// Returns the total number of rows successfully deleted.\n");
             code.push_str(&format!("    pub async fn delete_many_by_pk<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, ids: &[{k_rust_type}]) -> sqlx::Result<u64> {{\n", dialect.db_type(), k_rust_type = pk_rust_type));
             code.push_str("        if ids.is_empty() { return Ok(0); }\n");
             code.push_str(&format!("        let mut query_builder: sqlx::QueryBuilder<{}> = sqlx::QueryBuilder::new(\"DELETE FROM {} WHERE {} IN \");\n", dialect.db_type(), table.name, dialect.escape_sql_col(&pk.name)));
@@ -605,6 +632,9 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
                 offset += 1;
             }
 
+            code.push_str(&format!("    /// Updates records matching the `{}` index.\n", idx.name));
+            code.push_str("    /// \n");
+            code.push_str("    /// **Warning:** This overwrites all columns (except the index columns) with the values from the current struct.\n");
             code.push_str(&format!("    pub async fn update_by_{}<'e, E: sqlx::Executor<'e, Database = {}>>(&self, executor: E) -> sqlx::Result<u64> {{\n", func_suffix, dialect.db_type()));
             code.push_str(&format!("        let query = \"UPDATE {} SET {} WHERE {}\";\n        let result = sqlx::query(&query)\n", table.name, set_clauses, idx_where));
             for col in &set_cols {
@@ -629,6 +659,9 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
             }
         }
 
+        code.push_str(&format!("    /// Deletes records matching the `{}` index.\n", idx.name));
+        code.push_str("    /// \n");
+        code.push_str("    /// Returns the number of affected rows.\n");
         code.push_str(&format!("    pub async fn delete_by_{}<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, {}) -> sqlx::Result<u64> {{\n", func_suffix, dialect.db_type(), idx_params.join(", ")));
         code.push_str(&format!("        let query = \"DELETE FROM {} WHERE {}\";\n        let result = sqlx::query(&query)\n", table.name, where_clauses));
         for c in &idx.columns {
@@ -651,21 +684,32 @@ fn generate_read_methods(table: &Table, dialect: DbDialect) -> String {
     code.push_str(&format!("impl {} {{\n", struct_name));
 
     // 1. --- MÉTHODES GLOBALES ---
-    code.push_str("    /// Compte le nombre total de lignes.\n");
+    code.push_str("    /// Counts the total number of rows in the table.\n");
+    code.push_str("    /// \n");
+    code.push_str("    /// **Note:** On large tables, `COUNT(*)` can be slow. Use it thoughtfully.\n");
     code.push_str(&format!("    pub async fn count<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E) -> sqlx::Result<u64> {{\n", dialect.db_type()));
     code.push_str(&format!("        let query = \"SELECT COUNT(*) FROM {}\";\n", table.name));
     code.push_str("        let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;\n");
     code.push_str("        Ok(count as u64)\n");
     code.push_str("    }\n\n");
 
-    code.push_str("    /// Flux asynchrone (Stream) zéro-allocation sur toute la table.\n");
+    code.push_str("    /// Creates a zero-allocation Asynchronous Stream over the entire table.\n");
+    code.push_str("    /// \n");
+    code.push_str("    /// **Performance:** This is the absolute best way to process millions of rows.\n");
+    code.push_str("    /// Instead of loading all rows into RAM (which would cause out-of-memory crashes),\n");
+    code.push_str("    /// the Stream fetches and yields rows one by one directly from the database connection.\n");
     code.push_str(&format!("    pub fn stream_all<'e, E: sqlx::Executor<'e, Database = {}> + 'e>(executor: E) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {{\n", dialect.db_type()));
     code.push_str(&format!("        let query = \"SELECT * FROM {}\";\n", table.name));
     code.push_str("        sqlx::query_as::<_, Self>(query).fetch(executor)\n");
     code.push_str("    }\n\n");
 
-    code.push_str("    /// Pagination par numéro de page et tri dynamique (Offset/Limit).\n");
-    code.push_str("    /// Attention: order_by n'est pas bindé, à valider en amont contre l'injection SQL.\n");
+    code.push_str("    /// Classic Offset/Limit pagination with dynamic sorting.\n");
+    code.push_str("    /// \n");
+    code.push_str("    /// **SECURITY WARNING:** The `order_by` parameter is NOT bound via prepared statements \n");
+    code.push_str("    /// (SQL does not allow binding column names). You MUST strictly whitelist the user input \n");
+    code.push_str("    /// before passing it here to prevent SQL Injection!\n");
+    code.push_str("    /// \n");
+    code.push_str("    /// **Performance:** Offset pagination becomes very slow on deep pages. Consider `list_by_cursor` instead.\n");
     code.push_str(&format!("    pub async fn list_paginated<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, order_by: &str, page: u32, page_size: u32) -> sqlx::Result<Vec<Self>> {{\n", dialect.db_type()));
     code.push_str("        let offset = page.saturating_sub(1) * page_size;\n");
     code.push_str(&format!("        let query = format!(\"SELECT * FROM {} ORDER BY {{}} LIMIT {} OFFSET {}\", order_by);\n", table.name, dialect.ph(1), dialect.ph(2)));
@@ -683,7 +727,9 @@ fn generate_read_methods(table: &Table, dialect: DbDialect) -> String {
         let pk_args = pk_cols.iter().map(|c| format!("{}: &{}", escape_rust_keyword(&format!("{}", AsSnakeCase(&c.name))), map_sql_type(&c.data_type, c.is_nullable, dialect))).collect::<Vec<_>>().join(", ");
         let pk_where = pk_cols.iter().enumerate().map(|(i, c)| format!("{} = {}", dialect.escape_sql_col(&c.name), dialect.ph(i + 1))).collect::<Vec<_>>().join(" AND ");
 
-        code.push_str("    /// Récupère une ligne via sa clé primaire.\n");
+        code.push_str("    /// Retrieves a single record using its Primary Key.\n");
+        code.push_str("    /// \n");
+        code.push_str("    /// Returns `Some(Self)` if the record exists, or `None` if it does not.\n");
         code.push_str(&format!("    pub async fn get_by_pk<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, {}) -> sqlx::Result<Option<Self>> {{\n", dialect.db_type(), pk_args));
         code.push_str(&format!("        let query = \"SELECT * FROM {} WHERE {}\";\n", table.name, pk_where));
         code.push_str("        sqlx::query_as::<_, Self>(query)\n");
@@ -693,7 +739,11 @@ fn generate_read_methods(table: &Table, dialect: DbDialect) -> String {
         }
         code.push_str("            .fetch_optional(executor).await\n    }\n\n");
 
-        code.push_str("    /// Vérifie si une ligne existe (Très léger, évite la RAM).\n");
+        code.push_str("    /// Checks if a record exists using its Primary Key.\n");
+        code.push_str("    /// \n");
+        code.push_str("    /// **Performance:** This uses a `SELECT 1 ... LIMIT 1` query. It is infinitely faster \n");
+        code.push_str("    /// and lighter than `get_by_pk` when you only need to check for existence, because it avoids \n");
+        code.push_str("    /// transferring and deserializing the full row data.\n");
         code.push_str(&format!("    pub async fn exists_by_pk<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, {}) -> sqlx::Result<bool> {{\n", dialect.db_type(), pk_args));
         code.push_str(&format!("        let query = \"SELECT 1 FROM {} WHERE {} LIMIT 1\";\n", table.name, pk_where));
         code.push_str("        let exists: Option<(i32,)> = sqlx::query_as(query)\n");
@@ -706,7 +756,11 @@ fn generate_read_methods(table: &Table, dialect: DbDialect) -> String {
         if pk_cols.len() == 1 {
             let pk = pk_cols[0];
             let pk_rust_type = map_sql_type(&pk.data_type, pk.is_nullable, dialect);
-            code.push_str("    /// Pagination par curseur (Performance absolue O(1) sur le B-Tree).\n");
+            code.push_str("    /// Cursor-based Pagination (Keyset Pagination).\n");
+            code.push_str("    /// \n");
+            code.push_str("    /// **Performance:** This is the SOTA (State of the Art) standard for pagination.\n");
+            code.push_str("    /// Unlike `OFFSET` which scans and discards thousands of rows, this jumps immediately to the \n");
+            code.push_str("    /// correct row using the B-Tree index, offering O(1) constant-time absolute performance.\n");
             code.push_str(&format!("    pub async fn list_by_cursor<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, last_id: &{}, limit: u32) -> sqlx::Result<Vec<Self>> {{\n", dialect.db_type(), pk_rust_type));
             code.push_str(&format!("        let query = \"SELECT * FROM {} WHERE {} > {} ORDER BY {} ASC LIMIT {}\";\n", table.name, dialect.escape_sql_col(&pk.name), dialect.ph(1), dialect.escape_sql_col(&pk.name), dialect.ph(2)));
             if dialect == DbDialect::Postgres {
@@ -742,7 +796,9 @@ fn generate_read_methods(table: &Table, dialect: DbDialect) -> String {
         }
         let params_str = idx_params.join(", ");
 
-        code.push_str(&format!("    /// Vérifie l'existence via l'index `{}`.\n", idx.name));
+        code.push_str(&format!("    /// Checks if a record exists using the `{}` index.\n", idx.name));
+        code.push_str("    /// \n");
+        code.push_str("    /// **Performance:** Extremely fast, uses `SELECT 1 ... LIMIT 1`.\n");
         code.push_str(&format!("    pub async fn exists_by_{}<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, {}) -> sqlx::Result<bool> {{\n", func_suffix, dialect.db_type(), params_str));
         code.push_str(&format!("        let query = \"SELECT 1 FROM {} WHERE {} LIMIT 1\";\n", table.name, where_clauses));
         code.push_str(&format!("        let exists: Option<(i32,)> = sqlx::query_as(query){}.fetch_optional(executor).await?;\n", bind_calls));
@@ -750,19 +806,19 @@ fn generate_read_methods(table: &Table, dialect: DbDialect) -> String {
         code.push_str("    }\n\n");
 
         if idx.is_unique {
-            code.push_str(&format!("    /// Récupère une ligne (unique) via l'index `{}`.\n", idx.name));
+            code.push_str(&format!("    /// Retrieves a single record using the unique `{}` index.\n", idx.name));
             code.push_str(&format!("    pub async fn get_by_{}<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, {}) -> sqlx::Result<Option<Self>> {{\n", func_suffix, dialect.db_type(), params_str));
             code.push_str(&format!("        let query = \"SELECT * FROM {} WHERE {}\";\n", table.name, where_clauses));
             code.push_str(&format!("        sqlx::query_as::<_, Self>(query){}.fetch_optional(executor).await\n", bind_calls));
             code.push_str("    }\n\n");
         } else {
-            code.push_str(&format!("    /// Liste des lignes via l'index `{}`.\n", idx.name));
+            code.push_str(&format!("    /// Retrieves all records matching the `{}` index.\n", idx.name));
             code.push_str(&format!("    pub async fn list_by_{}<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, {}) -> sqlx::Result<Vec<Self>> {{\n", func_suffix, dialect.db_type(), params_str));
             code.push_str(&format!("        let query = \"SELECT * FROM {} WHERE {}\";\n", table.name, where_clauses));
             code.push_str(&format!("        sqlx::query_as::<_, Self>(query){}.fetch_all(executor).await\n", bind_calls));
             code.push_str("    }\n\n");
 
-            code.push_str(&format!("    /// Flux asynchrone (Stream) zéro-allocation sur l'index `{}`.\n", idx.name));
+            code.push_str(&format!("    /// Creates a zero-allocation Asynchronous Stream using the `{}` index.\n", idx.name));
             code.push_str(&format!("    pub fn stream_by_{}<'e, E: sqlx::Executor<'e, Database = {}> + 'e>(executor: E, {}) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {{\n", func_suffix, dialect.db_type(), params_str));
             code.push_str(&format!("        let query = \"SELECT * FROM {} WHERE {}\";\n", table.name, where_clauses));
             code.push_str(&format!("        sqlx::query_as::<_, Self>(query){}.fetch(executor)\n", stream_binds));
@@ -781,7 +837,10 @@ fn generate_patch_struct(table: &Table, dialect: DbDialect) -> String {
     let struct_name = format!("{}", AsPascalCase(&table.name));
     let patch_struct_name = format!("{}Patch", struct_name);
 
-    code.push_str(&format!("/// Structure pour la mise à jour partielle (Patch) de `{}`.\n", table.name));
+    code.push_str(&format!("/// Structure used for partial updates (Patching) of `{}`.\n", table.name));
+    code.push_str("/// \n");
+    code.push_str("/// Each field is wrapped in an `Option`. If a field is `None`, it will be completely ignored during the update.\n");
+    code.push_str("/// If it is `Some(value)`, that column will be updated in the database.\n");
     code.push_str("#[derive(Debug, Clone, Default)]\n");
     code.push_str(&format!("pub struct {} {{\n", patch_struct_name));
 
@@ -813,8 +872,11 @@ fn generate_partial_update_method(table: &Table, dialect: DbDialect) -> String {
 
     let mut code = String::new();
     code.push_str(&format!("impl {} {{\n", struct_name));
-    code.push_str("    /// Met à jour uniquement les colonnes renseignées (Patch).\n");
-    code.push_str("    /// Économise le réseau et les écritures disque de la base de données.\n");
+    code.push_str("    /// Updates ONLY the columns that contain data in the `patch` struct.\n");
+    code.push_str("    /// \n");
+    code.push_str("    /// **Performance:** This is the most optimized way to update data.\n");
+    code.push_str("    /// It dynamically builds the SQL query to only include the changed columns, which saves network bandwidth\n");
+    code.push_str("    /// and significantly reduces database disk I/O (WAL logging) compared to a full row update.\n");
     
     code.push_str(&format!("    pub async fn update_partial_by_pk<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, {}, patch: &{}) -> sqlx::Result<u64> {{\n", dialect.db_type(), pk_args, patch_struct_name));
     code.push_str(&format!("        let mut query_builder: sqlx::QueryBuilder<{}> = sqlx::QueryBuilder::new(\"UPDATE {} SET \");\n", dialect.db_type(), table.name));
