@@ -192,8 +192,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "heck",
- "proc-macro2",
- "quote",
  "sqlx",
  "tokio",
 ]
