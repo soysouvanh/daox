@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use sqlx::{mysql::MySqlPoolOptions, postgres::PgPoolOptions, Row};
+use sqlx::{mysql::MySqlPoolOptions, postgres::PgPoolOptions, sqlite::SqlitePoolOptions, Row};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::path::Path;
@@ -12,6 +12,7 @@ use heck::{AsPascalCase, AsSnakeCase};
 pub enum DbDialect {
     MySql,
     Postgres,
+    Sqlite,
 }
 
 impl DbDialect {
@@ -19,6 +20,7 @@ impl DbDialect {
         match self {
             DbDialect::MySql => "sqlx::MySql",
             DbDialect::Postgres => "sqlx::Postgres",
+            DbDialect::Sqlite => "sqlx::Sqlite",
         }
     }
 
@@ -26,6 +28,7 @@ impl DbDialect {
         match self {
             DbDialect::MySql => "?".to_string(),
             DbDialect::Postgres => format!("${}", i),
+            DbDialect::Sqlite => "?".to_string(),
         }
     }
 }
@@ -68,6 +71,8 @@ impl DaoxGenerator {
     pub fn new(database_url: &str, output_dir: &str) -> Self {
         let dialect = if database_url.starts_with("postgres") {
             DbDialect::Postgres
+        } else if database_url.starts_with("sqlite") {
+            DbDialect::Sqlite
         } else {
             DbDialect::MySql
         };
@@ -108,6 +113,16 @@ impl DaoxGenerator {
                     .context("Impossible de se connecter à PostgreSQL. Docker tourne-t-il ?")?;
                 
                 self.introspect_postgres(&pool).await?
+            }
+            DbDialect::Sqlite => {
+                println!("cargo:warning=🪶 Détection Moteur SQLite");
+                let pool = SqlitePoolOptions::new()
+                    .max_connections(2)
+                    .connect(&self.database_url)
+                    .await
+                    .context("Impossible de se connecter à SQLite.")?;
+                
+                self.introspect_sqlite(&pool).await?
             }
         };
 
@@ -266,6 +281,72 @@ impl DaoxGenerator {
         }
         Ok(tables)
     }
+
+    async fn introspect_sqlite(&self, pool: &sqlx::sqlite::SqlitePool) -> Result<Vec<Table>> {
+        let mut tables = Vec::new();
+        
+        let db_tables = sqlx::query("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'")
+            .fetch_all(pool).await?;
+
+        for row in db_tables {
+            let table_name: String = row.get("name");
+            let table_type: String = row.get("type");
+            let is_view = table_type == "view";
+            
+            let cols = sqlx::query(&format!("PRAGMA table_info('{}')", table_name))
+                .fetch_all(pool).await?;
+            
+            let mut columns = Vec::new();
+            for col_row in cols {
+                let name: String = col_row.get("name");
+                let data_type: String = col_row.get("type");
+                let notnull: i32 = col_row.try_get("notnull").unwrap_or(0);
+                let pk: i32 = col_row.try_get("pk").unwrap_or(0);
+                
+                let is_nullable = notnull == 0 && pk == 0;
+                let is_primary = pk > 0;
+                let is_auto_increment = is_primary && data_type.to_uppercase().contains("INT");
+                
+                columns.push(Column {
+                    name,
+                    data_type: data_type.to_lowercase(),
+                    is_nullable,
+                    is_primary,
+                    is_auto_increment,
+                });
+            }
+
+            let mut indexes = Vec::new();
+            let idxs = sqlx::query(&format!("PRAGMA index_list('{}')", table_name))
+                .fetch_all(pool).await?;
+            
+            for idx_row in idxs {
+                let name: String = idx_row.get("name");
+                let unique: i32 = idx_row.get("unique");
+                let origin: String = idx_row.try_get("origin").unwrap_or_else(|_| "".to_string());
+                
+                if origin == "pk" { continue; }
+                let is_unique = unique != 0;
+                
+                let idx_cols = sqlx::query(&format!("PRAGMA index_info('{}')", name))
+                    .fetch_all(pool).await?;
+                
+                let mut idx_columns = Vec::new();
+                for c_row in idx_cols {
+                    if let Ok(col_name) = c_row.try_get::<String, _>("name") {
+                        if !col_name.is_empty() {
+                            idx_columns.push(col_name);
+                        }
+                    }
+                }
+                
+                indexes.push(Index { name, columns: idx_columns, is_unique });
+            }
+
+            tables.push(Table { name: table_name, is_view, columns, indexes });
+        }
+        Ok(tables)
+    }
 }
 
 // --- TRADUCTION DES TYPES SQL EN TYPES RUST (Unifié) ---
@@ -370,6 +451,8 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
         code.push_str("            .execute(executor).await?;\n");
         if dialect == DbDialect::MySql {
             code.push_str("        Ok(result.last_insert_id())\n    }\n\n");
+        } else if dialect == DbDialect::Sqlite {
+            code.push_str("        Ok(result.last_insert_rowid() as u64)\n    }\n\n");
         } else {
             code.push_str("        Ok(result.rows_affected())\n    }\n\n");
         }
@@ -399,7 +482,7 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
         conflict_cols = idx.columns.clone();
     }
 
-    if dialect == DbDialect::Postgres {
+    if dialect == DbDialect::Postgres || dialect == DbDialect::Sqlite {
         if !conflict_cols.is_empty() {
             let conflict_target = conflict_cols.join(", ");
             let update_clauses = insert_cols.iter().map(|c| format!("{0} = EXCLUDED.{0}", c.name)).collect::<Vec<_>>().join(", ");

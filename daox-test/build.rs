@@ -26,4 +26,30 @@ async fn main() {
     // On lance le générateur pour Postgres
     let generator_pg = daox::DaoxGenerator::new(pg_url, pg_out);
     generator_pg.generate().await.expect("Erreur lors de la génération DAO Postgres");
+
+    // Création de la DB SQLite de test
+    let sqlite_db_path = "daox_test.sqlite";
+    if !Path::new(sqlite_db_path).exists() {
+        fs::File::create(sqlite_db_path).unwrap();
+    }
+    
+    // Initialisation du schéma SQLite
+    let sqlite_url = format!("sqlite://{}", sqlite_db_path);
+    let sqlite_pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .connect(&sqlite_url).await.unwrap();
+    
+    let sqlite_schema = fs::read_to_string("../init_sqlite.sql").unwrap();
+    for query in sqlite_schema.split(";") {
+        let q = query.trim();
+        if !q.is_empty() {
+            sqlx::query(q).execute(&sqlite_pool).await.unwrap();
+        }
+    }
+    
+    let sqlite_out = "src/models_sqlite";
+    if !Path::new(sqlite_out).exists() { fs::create_dir_all(sqlite_out).unwrap(); }
+
+    // On lance le générateur pour SQLite
+    let generator_sqlite = daox::DaoxGenerator::new(&sqlite_url, sqlite_out);
+    generator_sqlite.generate().await.expect("Erreur lors de la génération DAO SQLite");
 }
