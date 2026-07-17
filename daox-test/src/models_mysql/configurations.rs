@@ -58,7 +58,7 @@ impl Configurations {
 impl Configurations {
     /// Insère la ligne en base de données. Retourne l'ID généré (ou 0).
     pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(&self, executor: E) -> sqlx::Result<u64> {
-        let query = "INSERT INTO configurations (type, match, value) VALUES (?, ?, ?)";
+        let query = "INSERT INTO configurations (`type`, `match`, value) VALUES (?, ?, ?)";
         let result = sqlx::query(&query)
             .bind(&self.r#type)
             .bind(&self.r#match)
@@ -70,7 +70,7 @@ impl Configurations {
     /// Insère de multiples lignes en une seule requête réseau (Batch).
     pub async fn insert_batch<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, items: &[Self]) -> sqlx::Result<u64> {
         if items.is_empty() { return Ok(0); }
-        let mut query_builder: sqlx::QueryBuilder<sqlx::MySql> = sqlx::QueryBuilder::new("INSERT INTO configurations (type, match, value) ");
+        let mut query_builder: sqlx::QueryBuilder<sqlx::MySql> = sqlx::QueryBuilder::new("INSERT INTO configurations (`type`, `match`, value) ");
         query_builder.push_values(items, |mut b, item| {
             b.push_bind(&item.r#type);
             b.push_bind(&item.r#match);
@@ -82,7 +82,7 @@ impl Configurations {
 
     /// Insère ou met à jour la ligne si une contrainte d'unicité est violée (Upsert).
     pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(&self, executor: E) -> sqlx::Result<u64> {
-        let query = "INSERT INTO configurations (type, match, value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE type = VALUES(type), match = VALUES(match), value = VALUES(value)";
+        let query = "INSERT INTO configurations (`type`, `match`, value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE `type` = VALUES(`type`), `match` = VALUES(`match`), value = VALUES(value)";
         let result = sqlx::query(&query)
             .bind(&self.r#type)
             .bind(&self.r#match)
@@ -93,7 +93,7 @@ impl Configurations {
 
     /// Met à jour la ligne entière via sa clé primaire.
     pub async fn update_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(&self, executor: E) -> sqlx::Result<u64> {
-        let query = "UPDATE configurations SET type = ?, match = ?, value = ? WHERE id = ?";
+        let query = "UPDATE configurations SET `type` = ?, `match` = ?, value = ? WHERE id = ?";
         let result = sqlx::query(&query)
             .bind(&self.r#type)
             .bind(&self.r#match)
@@ -144,12 +144,12 @@ impl Configurations {
 
         if let Some(val) = &patch.r#type {
             has_fields = true;
-            separated.push("type = ");
+            separated.push("`type` = ");
             separated.push_bind_unseparated(val.clone());
         }
         if let Some(val) = &patch.r#match {
             has_fields = true;
-            separated.push("match = ");
+            separated.push("`match` = ");
             separated.push_bind_unseparated(val.clone());
         }
         if let Some(val) = &patch.value {

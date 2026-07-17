@@ -31,6 +31,31 @@ impl DbDialect {
             DbDialect::Sqlite => "?".to_string(),
         }
     }
+
+    /// Échappe un nom de colonne si c'est un mot-clé réservé SQL.
+    /// MySQL/MariaDB : `backticks`, PostgreSQL/SQLite : "double quotes".
+    fn escape_sql_col(&self, name: &str) -> String {
+        const SQL_KEYWORDS: &[&str] = &[
+            "type", "match", "order", "group", "select", "insert", "update", "delete",
+            "where", "from", "table", "index", "key", "primary", "foreign", "check",
+            "default", "column", "create", "alter", "drop", "values", "set", "into",
+            "join", "on", "as", "and", "or", "not", "null", "is", "in", "like",
+            "between", "exists", "having", "limit", "offset", "union", "all", "any",
+            "case", "when", "then", "else", "end", "distinct", "asc", "desc",
+            "constraint", "references", "grant", "revoke", "trigger", "view",
+            "begin", "commit", "rollback", "do", "for", "if", "return", "use",
+            "user", "role", "schema", "sequence", "function", "procedure",
+        ];
+        if SQL_KEYWORDS.contains(&name.to_lowercase().as_str()) {
+            match self {
+                DbDialect::MySql => format!("`{}`", name),
+                // Les guillemets doivent être échappés car le résultat est injecté dans un string literal Rust
+                DbDialect::Postgres | DbDialect::Sqlite => format!("\\\"{}\\\"", name),
+            }
+        } else {
+            name.to_string()
+        }
+    }
 }
 
 // --- STRUCTURES DE MÉTADONNÉES ---
@@ -148,7 +173,7 @@ impl DaoxGenerator {
             code.push_str(&format!("pub struct {} {{\n", struct_name));
 
             for col in &table.columns {
-                let rust_type = map_sql_type(&col.data_type, col.is_nullable);
+                let rust_type = map_sql_type(&col.data_type, col.is_nullable, self.dialect);
                 let snake_col_name = format!("{}", AsSnakeCase(&col.name));
                 let rust_field = escape_rust_keyword(&snake_col_name);
                 code.push_str(&format!("    pub {}: {},\n", rust_field, rust_type));
@@ -158,10 +183,9 @@ impl DaoxGenerator {
             // S'applique aux TABLES et aux VUES de manière égale !
             code.push_str(&generate_read_methods(table, self.dialect));
 
-            // Les méthodes d'écriture ne s'appliquent QUE pour les Tables
             if !table.is_view {
                 code.push_str(&generate_write_methods(table, self.dialect));
-                code.push_str(&generate_patch_struct(table));
+                code.push_str(&generate_patch_struct(table, self.dialect));
                 code.push_str(&generate_partial_update_method(table, self.dialect));
             }
 
@@ -351,10 +375,11 @@ impl DaoxGenerator {
 
 // --- TRADUCTION DES TYPES SQL EN TYPES RUST (Unifié) ---
 
-fn map_sql_type(sql_type: &str, is_nullable: bool) -> String {
+fn map_sql_type(sql_type: &str, is_nullable: bool, dialect: DbDialect) -> String {
     let rust_type = match sql_type.to_lowercase().as_str() {
-        // Entiers
+        // Entiers — SQLite INTEGER est toujours 64-bit (rowid)
         "bigint" | "int8" | "bigserial" => "i64",
+        "integer" if dialect == DbDialect::Sqlite => "i64",
         "int" | "integer" | "int4" | "mediumint" | "serial" => "i32",
         "smallint" | "int2" => "i16",
         "tinyint" => "i8",
@@ -404,7 +429,6 @@ fn escape_rust_keyword(name: &str) -> String {
 // --- GÉNÉRATEUR DES MÉTHODES D'ÉCRITURE ---
 
 fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
-    use heck::{AsSnakeCase, AsPascalCase};
     let mut code = String::new();
     let struct_name = format!("{}", AsPascalCase(&table.name));
     
@@ -414,7 +438,7 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
     
     // On exclut la colonne auto-incrémentée de l'insertion
     let insert_cols: Vec<&Column> = table.columns.iter().filter(|c| !c.is_auto_increment).collect();
-    let col_names = insert_cols.iter().map(|c| c.name.clone()).collect::<Vec<_>>().join(", ");
+    let col_names = insert_cols.iter().map(|c| dialect.escape_sql_col(&c.name)).collect::<Vec<_>>().join(", ");
     
     let mut placeholders = String::new();
     for i in 0..insert_cols.len() {
@@ -434,7 +458,7 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
     if dialect == DbDialect::Postgres && is_numeric_pk {
         let pk = pk_col.unwrap();
         // Le cast ::bigint est essentiel pour sqlx Postgres si le PK est un INT (i32) car on fetch dans (i64,)
-        code.push_str(&format!("        let query = \"INSERT INTO {} ({}) VALUES ({}) RETURNING {}::bigint\";\n", table.name, col_names, placeholders, pk.name));
+        code.push_str(&format!("        let query = \"INSERT INTO {} ({}) VALUES ({}) RETURNING {}::bigint\";\n", table.name, col_names, placeholders, dialect.escape_sql_col(&pk.name)));
         code.push_str("        let (id,): (i64,) = sqlx::query_as(&query)\n");
         for col in &insert_cols {
             let field = escape_rust_keyword(&format!("{}", AsSnakeCase(&col.name)));
@@ -475,23 +499,28 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
     code.push_str(&format!("    pub async fn upsert<'e, E: sqlx::Executor<'e, Database = {}>>(&self, executor: E) -> sqlx::Result<u64> {{\n", dialect.db_type()));
     
     let mut conflict_cols = Vec::new();
-    let pk_cols: Vec<_> = table.columns.iter().filter(|c| c.is_primary).map(|c| c.name.clone()).collect();
-    if !pk_cols.is_empty() {
-        conflict_cols = pk_cols;
+    let pk_cols_ref: Vec<_> = table.columns.iter().filter(|c| c.is_primary).collect();
+    let has_auto_inc_pk = pk_cols_ref.iter().any(|c| c.is_auto_increment);
+    let pk_col_names: Vec<_> = pk_cols_ref.iter().map(|c| c.name.clone()).collect();
+    
+    // Si la PK est auto-incrémentée, elle est exclue de l'INSERT. Le conflit sur PK ne peut donc jamais arriver.
+    // Dans ce cas précis, on doit obligatoirement utiliser un index unique comme cible de conflit.
+    if !pk_col_names.is_empty() && !has_auto_inc_pk {
+        conflict_cols = pk_col_names;
     } else if let Some(idx) = table.indexes.iter().find(|idx| idx.is_unique) {
         conflict_cols = idx.columns.clone();
     }
 
     if dialect == DbDialect::Postgres || dialect == DbDialect::Sqlite {
         if !conflict_cols.is_empty() {
-            let conflict_target = conflict_cols.join(", ");
-            let update_clauses = insert_cols.iter().map(|c| format!("{0} = EXCLUDED.{0}", c.name)).collect::<Vec<_>>().join(", ");
+            let conflict_target = conflict_cols.iter().map(|c| dialect.escape_sql_col(c)).collect::<Vec<_>>().join(", ");
+            let update_clauses = insert_cols.iter().map(|c| { let esc = dialect.escape_sql_col(&c.name); format!("{0} = EXCLUDED.{0}", esc) }).collect::<Vec<_>>().join(", ");
             code.push_str(&format!("        let query = \"INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO UPDATE SET {}\";\n", table.name, col_names, placeholders, conflict_target, update_clauses));
         } else {
             code.push_str(&format!("        let query = \"INSERT INTO {} ({}) VALUES ({})\";\n", table.name, col_names, placeholders));
         }
     } else {
-        let update_clauses = insert_cols.iter().map(|c| format!("{0} = VALUES({0})", c.name)).collect::<Vec<_>>().join(", ");
+        let update_clauses = insert_cols.iter().map(|c| { let esc = dialect.escape_sql_col(&c.name); format!("{0} = VALUES({0})", esc) }).collect::<Vec<_>>().join(", ");
         code.push_str(&format!("        let query = \"INSERT INTO {} ({}) VALUES ({}) ON DUPLICATE KEY UPDATE {}\";\n", table.name, col_names, placeholders, update_clauses));
     }
     code.push_str("        let result = sqlx::query(&query)\n");
@@ -504,16 +533,16 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
     // OPÉRATIONS LIÉES À LA CLÉ PRIMAIRE
     let pk_cols: Vec<&Column> = table.columns.iter().filter(|c| c.is_primary).collect();
     if !pk_cols.is_empty() {
-        let pk_args = pk_cols.iter().map(|c| format!("{}: &{}", escape_rust_keyword(&format!("{}", AsSnakeCase(&c.name))), map_sql_type(&c.data_type, c.is_nullable))).collect::<Vec<_>>().join(", ");
+        let pk_args = pk_cols.iter().map(|c| format!("{}: &{}", escape_rust_keyword(&format!("{}", AsSnakeCase(&c.name))), map_sql_type(&c.data_type, c.is_nullable, dialect))).collect::<Vec<_>>().join(", ");
         let update_cols: Vec<&Column> = table.columns.iter().filter(|c| !c.is_primary).collect();
         
         let mut set_clauses = String::new();
         for (i, c) in update_cols.iter().enumerate() {
             if i > 0 { set_clauses.push_str(", "); }
-            set_clauses.push_str(&format!("{} = {}", c.name, dialect.ph(i + 1)));
+            set_clauses.push_str(&format!("{} = {}", dialect.escape_sql_col(&c.name), dialect.ph(i + 1)));
         }
         
-        let pk_where = pk_cols.iter().enumerate().map(|(i, c)| format!("{} = {}", c.name, dialect.ph(update_cols.len() + i + 1))).collect::<Vec<_>>().join(" AND ");
+        let pk_where = pk_cols.iter().enumerate().map(|(i, c)| format!("{} = {}", dialect.escape_sql_col(&c.name), dialect.ph(update_cols.len() + i + 1))).collect::<Vec<_>>().join(" AND ");
 
         // 4. --- UPDATE BY PK ---
         code.push_str("    /// Met à jour la ligne entière via sa clé primaire.\n");
@@ -531,7 +560,7 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
         code.push_str("            .execute(executor).await?;\n        Ok(result.rows_affected())\n    }\n\n");
 
         // 5. --- DELETE BY PK ---
-        let pk_where_del = pk_cols.iter().enumerate().map(|(i, c)| format!("{} = {}", c.name, dialect.ph(i + 1))).collect::<Vec<_>>().join(" AND ");
+        let pk_where_del = pk_cols.iter().enumerate().map(|(i, c)| format!("{} = {}", dialect.escape_sql_col(&c.name), dialect.ph(i + 1))).collect::<Vec<_>>().join(" AND ");
         code.push_str("    /// Supprime la ligne via sa clé primaire.\n");
         code.push_str(&format!("    pub async fn delete_by_pk<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, {}) -> sqlx::Result<u64> {{\n", dialect.db_type(), pk_args));
         code.push_str(&format!("        let query = \"DELETE FROM {} WHERE {}\";\n", table.name, pk_where_del));
@@ -545,12 +574,12 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
         // 6. --- DELETE MANY BY PK ---
         if pk_cols.len() == 1 {
             let pk = pk_cols[0];
-            let pk_rust_type = map_sql_type(&pk.data_type, pk.is_nullable);
+            let pk_rust_type = map_sql_type(&pk.data_type, pk.is_nullable, dialect);
             
             code.push_str("    /// Supprime de multiples lignes via leurs clés primaires (Batch).\n");
             code.push_str(&format!("    pub async fn delete_many_by_pk<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, ids: &[{k_rust_type}]) -> sqlx::Result<u64> {{\n", dialect.db_type(), k_rust_type = pk_rust_type));
             code.push_str("        if ids.is_empty() { return Ok(0); }\n");
-            code.push_str(&format!("        let mut query_builder: sqlx::QueryBuilder<{}> = sqlx::QueryBuilder::new(\"DELETE FROM {} WHERE {} IN \");\n", dialect.db_type(), table.name, pk.name));
+            code.push_str(&format!("        let mut query_builder: sqlx::QueryBuilder<{}> = sqlx::QueryBuilder::new(\"DELETE FROM {} WHERE {} IN \");\n", dialect.db_type(), table.name, dialect.escape_sql_col(&pk.name)));
             code.push_str("        query_builder.push(\"(\");\n        let mut separated = query_builder.separated(\", \");\n");
             code.push_str("        for id in ids { separated.push_bind(id); }\n");
             code.push_str("        separated.push_unseparated(\")\");\n        let result = query_builder.build().execute(executor).await?;\n        Ok(result.rows_affected())\n    }\n\n");
@@ -565,14 +594,14 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
             let mut set_clauses = String::new();
             for (i, c) in set_cols.iter().enumerate() {
                 if i > 0 { set_clauses.push_str(", "); }
-                set_clauses.push_str(&format!("{} = {}", c.name, dialect.ph(i + 1)));
+                set_clauses.push_str(&format!("{} = {}", dialect.escape_sql_col(&c.name), dialect.ph(i + 1)));
             }
 
             let mut offset = set_cols.len() + 1;
             let mut idx_where = String::new();
             for (i, c) in idx.columns.iter().enumerate() {
                 if i > 0 { idx_where.push_str(" AND "); }
-                idx_where.push_str(&format!("{} = {}", c, dialect.ph(offset)));
+                idx_where.push_str(&format!("{} = {}", dialect.escape_sql_col(c), dialect.ph(offset)));
                 offset += 1;
             }
 
@@ -594,9 +623,9 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
         for (i, c) in idx.columns.iter().enumerate() {
             if let Some(col) = table.columns.iter().find(|col| &col.name == c) {
                 let field = escape_rust_keyword(&format!("{}", AsSnakeCase(c)));
-                idx_params.push(format!("{}: &{}", field, map_sql_type(&col.data_type, col.is_nullable)));
+                idx_params.push(format!("{}: &{}", field, map_sql_type(&col.data_type, col.is_nullable, dialect)));
                 if i > 0 { where_clauses.push_str(" AND "); }
-                where_clauses.push_str(&format!("{} = {}", c, dialect.ph(i + 1)));
+                where_clauses.push_str(&format!("{} = {}", dialect.escape_sql_col(c), dialect.ph(i + 1)));
             }
         }
 
@@ -616,7 +645,6 @@ fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
 // --- GÉNÉRATEUR DES MÉTHODES DE LECTURE (TABLES & VUES) ---
 
 fn generate_read_methods(table: &Table, dialect: DbDialect) -> String {
-    use heck::{AsSnakeCase, AsPascalCase};
     let mut code = String::new();
     let struct_name = format!("{}", AsPascalCase(&table.name));
     
@@ -652,8 +680,8 @@ fn generate_read_methods(table: &Table, dialect: DbDialect) -> String {
 
     // 2. --- OPÉRATIONS LIÉES À LA CLÉ PRIMAIRE ---
     if !pk_cols.is_empty() {
-        let pk_args = pk_cols.iter().map(|c| format!("{}: &{}", escape_rust_keyword(&format!("{}", AsSnakeCase(&c.name))), map_sql_type(&c.data_type, c.is_nullable))).collect::<Vec<_>>().join(", ");
-        let pk_where = pk_cols.iter().enumerate().map(|(i, c)| format!("{} = {}", c.name, dialect.ph(i + 1))).collect::<Vec<_>>().join(" AND ");
+        let pk_args = pk_cols.iter().map(|c| format!("{}: &{}", escape_rust_keyword(&format!("{}", AsSnakeCase(&c.name))), map_sql_type(&c.data_type, c.is_nullable, dialect))).collect::<Vec<_>>().join(", ");
+        let pk_where = pk_cols.iter().enumerate().map(|(i, c)| format!("{} = {}", dialect.escape_sql_col(&c.name), dialect.ph(i + 1))).collect::<Vec<_>>().join(" AND ");
 
         code.push_str("    /// Récupère une ligne via sa clé primaire.\n");
         code.push_str(&format!("    pub async fn get_by_pk<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, {}) -> sqlx::Result<Option<Self>> {{\n", dialect.db_type(), pk_args));
@@ -677,10 +705,10 @@ fn generate_read_methods(table: &Table, dialect: DbDialect) -> String {
 
         if pk_cols.len() == 1 {
             let pk = pk_cols[0];
-            let pk_rust_type = map_sql_type(&pk.data_type, pk.is_nullable);
+            let pk_rust_type = map_sql_type(&pk.data_type, pk.is_nullable, dialect);
             code.push_str("    /// Pagination par curseur (Performance absolue O(1) sur le B-Tree).\n");
             code.push_str(&format!("    pub async fn list_by_cursor<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, last_id: &{}, limit: u32) -> sqlx::Result<Vec<Self>> {{\n", dialect.db_type(), pk_rust_type));
-            code.push_str(&format!("        let query = \"SELECT * FROM {} WHERE {} > {} ORDER BY {} ASC LIMIT {}\";\n", table.name, pk.name, dialect.ph(1), pk.name, dialect.ph(2)));
+            code.push_str(&format!("        let query = \"SELECT * FROM {} WHERE {} > {} ORDER BY {} ASC LIMIT {}\";\n", table.name, dialect.escape_sql_col(&pk.name), dialect.ph(1), dialect.escape_sql_col(&pk.name), dialect.ph(2)));
             if dialect == DbDialect::Postgres {
                  code.push_str("        sqlx::query_as::<_, Self>(query).bind(last_id).bind(limit as i64).fetch_all(executor).await\n");
             } else {
@@ -703,10 +731,10 @@ fn generate_read_methods(table: &Table, dialect: DbDialect) -> String {
             if let Some(col) = table.columns.iter().find(|col| &col.name == c) {
                 let snake = format!("{}", AsSnakeCase(c));
                 let field = escape_rust_keyword(&snake);
-                idx_params.push(format!("{}: &{}", field, map_sql_type(&col.data_type, col.is_nullable)));
+                idx_params.push(format!("{}: &{}", field, map_sql_type(&col.data_type, col.is_nullable, dialect)));
                 
                 if i > 0 { where_clauses.push_str(" AND "); }
-                where_clauses.push_str(&format!("{} = {}", c, dialect.ph(i + 1)));
+                where_clauses.push_str(&format!("{} = {}", dialect.escape_sql_col(c), dialect.ph(i + 1)));
 
                 bind_calls.push_str(&format!(".bind({})", field));
                 stream_binds.push_str(&format!(".bind({}.clone())", field));
@@ -748,8 +776,7 @@ fn generate_read_methods(table: &Table, dialect: DbDialect) -> String {
 
 // --- GÉNÉRATEUR DE LA STRUCTURE PATCH (UPDATE PARTIEL) ---
 
-fn generate_patch_struct(table: &Table) -> String {
-    use heck::{AsPascalCase, AsSnakeCase};
+fn generate_patch_struct(table: &Table, dialect: DbDialect) -> String {
     let mut code = String::new();
     let struct_name = format!("{}", AsPascalCase(&table.name));
     let patch_struct_name = format!("{}Patch", struct_name);
@@ -761,7 +788,7 @@ fn generate_patch_struct(table: &Table) -> String {
     for col in &table.columns {
         if col.is_primary { continue; } 
         
-        let rust_type = map_sql_type(&col.data_type, col.is_nullable);
+        let rust_type = map_sql_type(&col.data_type, col.is_nullable, dialect);
         let field_name = escape_rust_keyword(&format!("{}", AsSnakeCase(&col.name)));
         
         code.push_str(&format!("    pub {}: Option<{}>,\n", field_name, rust_type));
@@ -774,7 +801,6 @@ fn generate_patch_struct(table: &Table) -> String {
 // --- GÉNÉRATEUR DE LA FONCTION UPDATE_PARTIAL_BY_PK ---
 
 fn generate_partial_update_method(table: &Table, dialect: DbDialect) -> String {
-    use heck::{AsPascalCase, AsSnakeCase};
     
     let pk_cols: Vec<&Column> = table.columns.iter().filter(|c| c.is_primary).collect();
     if pk_cols.is_empty() {
@@ -783,7 +809,7 @@ fn generate_partial_update_method(table: &Table, dialect: DbDialect) -> String {
     
     let struct_name = format!("{}", AsPascalCase(&table.name));
     let patch_struct_name = format!("{}Patch", struct_name);
-    let pk_args = pk_cols.iter().map(|c| format!("{}: &{}", escape_rust_keyword(&format!("{}", AsSnakeCase(&c.name))), map_sql_type(&c.data_type, c.is_nullable))).collect::<Vec<_>>().join(", ");
+    let pk_args = pk_cols.iter().map(|c| format!("{}: &{}", escape_rust_keyword(&format!("{}", AsSnakeCase(&c.name))), map_sql_type(&c.data_type, c.is_nullable, dialect))).collect::<Vec<_>>().join(", ");
 
     let mut code = String::new();
     code.push_str(&format!("impl {} {{\n", struct_name));
@@ -803,7 +829,7 @@ fn generate_partial_update_method(table: &Table, dialect: DbDialect) -> String {
         
         code.push_str(&format!("        if let Some(val) = &patch.{} {{\n", field_name));
         code.push_str("            has_fields = true;\n");
-        code.push_str(&format!("            separated.push(\"{} = \");\n", col.name));
+        code.push_str(&format!("            separated.push(\"{} = \");\n", dialect.escape_sql_col(&col.name)));
         code.push_str("            separated.push_bind_unseparated(val.clone());\n");
         code.push_str("        }\n");
     }
@@ -816,10 +842,10 @@ fn generate_partial_update_method(table: &Table, dialect: DbDialect) -> String {
     let mut is_first = true;
     for col in &pk_cols {
         if is_first {
-            code.push_str(&format!("        query_builder.push(\" WHERE {} = \");\n", col.name));
+            code.push_str(&format!("        query_builder.push(\" WHERE {} = \");\n", dialect.escape_sql_col(&col.name)));
             is_first = false;
         } else {
-            code.push_str(&format!("        query_builder.push(\" AND {} = \");\n", col.name));
+            code.push_str(&format!("        query_builder.push(\" AND {} = \");\n", dialect.escape_sql_col(&col.name)));
         }
         let field = escape_rust_keyword(&format!("{}", AsSnakeCase(&col.name)));
         code.push_str(&format!("        query_builder.push_bind({}.clone());\n", field));

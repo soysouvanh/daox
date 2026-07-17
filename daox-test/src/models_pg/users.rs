@@ -120,7 +120,7 @@ impl Users {
 
     /// Insère ou met à jour la ligne si une contrainte d'unicité est violée (Upsert).
     pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
-        let query = "INSERT INTO users (email, first_name, last_name, status, created_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, first_name = EXCLUDED.first_name, last_name = EXCLUDED.last_name, status = EXCLUDED.status, created_at = EXCLUDED.created_at";
+        let query = "INSERT INTO users (email, first_name, last_name, status, created_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email, first_name = EXCLUDED.first_name, last_name = EXCLUDED.last_name, status = EXCLUDED.status, created_at = EXCLUDED.created_at";
         let result = sqlx::query(&query)
             .bind(&self.email)
             .bind(&self.first_name)

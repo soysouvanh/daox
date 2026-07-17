@@ -48,19 +48,6 @@ impl UserRoles {
         Ok(exists.is_some())
     }
 
-    /// Vérifie l'existence via l'index `idx_user_role`.
-    pub async fn exists_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, user_id: &i64, role_name: &String) -> sqlx::Result<bool> {
-        let query = "SELECT 1 FROM user_roles WHERE user_id = ? AND role_name = ? LIMIT 1";
-        let exists: Option<(i32,)> = sqlx::query_as(query).bind(user_id).bind(role_name).fetch_optional(executor).await?;
-        Ok(exists.is_some())
-    }
-
-    /// Récupère une ligne (unique) via l'index `idx_user_role`.
-    pub async fn get_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, user_id: &i64, role_name: &String) -> sqlx::Result<Option<Self>> {
-        let query = "SELECT * FROM user_roles WHERE user_id = ? AND role_name = ?";
-        sqlx::query_as::<_, Self>(query).bind(user_id).bind(role_name).fetch_optional(executor).await
-    }
-
     /// Vérifie l'existence via l'index `idx_user_id`.
     pub async fn exists_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, user_id: &i64) -> sqlx::Result<bool> {
         let query = "SELECT 1 FROM user_roles WHERE user_id = ? LIMIT 1";
@@ -78,6 +65,19 @@ impl UserRoles {
     pub fn stream_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql> + 'e>(executor: E, user_id: &i64) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
         let query = "SELECT * FROM user_roles WHERE user_id = ?";
         sqlx::query_as::<_, Self>(query).bind(user_id.clone()).fetch(executor)
+    }
+
+    /// Vérifie l'existence via l'index `idx_user_role`.
+    pub async fn exists_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, user_id: &i64, role_name: &String) -> sqlx::Result<bool> {
+        let query = "SELECT 1 FROM user_roles WHERE user_id = ? AND role_name = ? LIMIT 1";
+        let exists: Option<(i32,)> = sqlx::query_as(query).bind(user_id).bind(role_name).fetch_optional(executor).await?;
+        Ok(exists.is_some())
+    }
+
+    /// Récupère une ligne (unique) via l'index `idx_user_role`.
+    pub async fn get_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, user_id: &i64, role_name: &String) -> sqlx::Result<Option<Self>> {
+        let query = "SELECT * FROM user_roles WHERE user_id = ? AND role_name = ?";
+        sqlx::query_as::<_, Self>(query).bind(user_id).bind(role_name).fetch_optional(executor).await
     }
 
 }
@@ -139,6 +139,23 @@ impl UserRoles {
         Ok(result.rows_affected())
     }
 
+    pub async fn update_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(&self, executor: E) -> sqlx::Result<u64> {
+        let query = "UPDATE user_roles SET assigned_at = ? WHERE user_id = ?";
+        let result = sqlx::query(&query)
+            .bind(&self.assigned_at)
+            .bind(&self.user_id)
+            .execute(executor).await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn delete_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, user_id: &i64) -> sqlx::Result<u64> {
+        let query = "DELETE FROM user_roles WHERE user_id = ?";
+        let result = sqlx::query(&query)
+            .bind(user_id)
+            .execute(executor).await?;
+        Ok(result.rows_affected())
+    }
+
     pub async fn update_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "UPDATE user_roles SET assigned_at = ? WHERE user_id = ? AND role_name = ?";
         let result = sqlx::query(&query)
@@ -154,23 +171,6 @@ impl UserRoles {
         let result = sqlx::query(&query)
             .bind(user_id)
             .bind(role_name)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
-
-    pub async fn update_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(&self, executor: E) -> sqlx::Result<u64> {
-        let query = "UPDATE user_roles SET assigned_at = ? WHERE user_id = ?";
-        let result = sqlx::query(&query)
-            .bind(&self.assigned_at)
-            .bind(&self.user_id)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
-
-    pub async fn delete_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, user_id: &i64) -> sqlx::Result<u64> {
-        let query = "DELETE FROM user_roles WHERE user_id = ?";
-        let result = sqlx::query(&query)
-            .bind(user_id)
             .execute(executor).await?;
         Ok(result.rows_affected())
     }
