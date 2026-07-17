@@ -2,7 +2,9 @@
 name = "daox"
 version = "0.1.0"
 edition = "2021"
+authors = ["Vincent SOYSOUVANH <vincent.soysouvanh@gmail.com>"]
 description = "Générateur DAO Database-first orienté performance extrême"
+
 
 [dependencies]
 # Introspection DB (MySQL/MariaDB + PostgreSQL)

@@ -1,3 +1,14 @@
+//! # Daox: Database-First DAO Generator
+//!
+//! This library provides a highly optimized, zero-overhead Data Access Object (DAO) generator for Rust.
+//! It introspects your existing database schema (MySQL, PostgreSQL, or SQLite) and generates strongly-typed
+//! Rust structs and methods (CRUD, pagination, streams, partial updates) at compile time.
+//!
+//! ## Architecture Overview
+//! 1. **Introspection:** The generator connects to the database via SQLx and reads the schema metadata to discover tables, columns, primary keys, and indexes.
+//! 2. **Code Generation:** For each table, it generates a Rust struct and implements highly efficient read/write operations.
+//! 3. **Dialect Awareness:** SQL syntax and types differ drastically between MySQL, PostgreSQL, and SQLite. The `DbDialect` enum handles these engine-specific rules (e.g., escaping reserved keywords, mapping SQL integers to Rust).
+
 use anyhow::{Context, Result};
 use sqlx::{mysql::MySqlPoolOptions, postgres::PgPoolOptions, sqlite::SqlitePoolOptions, Row};
 use std::collections::HashMap;
@@ -8,6 +19,9 @@ use heck::{AsPascalCase, AsSnakeCase};
 
 // --- DÉTECTION DU MOTEUR (DIALECTE) ---
 
+/// Represents the supported database engines.
+/// This enum is crucial because each database engine has its own quirks
+/// regarding data types, parameter binding syntax (e.g., `?` vs `$1`), and keyword escaping.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DbDialect {
     MySql,
@@ -32,8 +46,13 @@ impl DbDialect {
         }
     }
 
-    /// Échappe un nom de colonne si c'est un mot-clé réservé SQL.
-    /// MySQL/MariaDB : `backticks`, PostgreSQL/SQLite : "double quotes".
+    /// Escapes column names if they conflict with reserved SQL keywords (e.g., `type`, `order`, `match`).
+    /// 
+    /// **Why this matters:** If your table has a column named `type`, generating `SELECT type FROM users`
+    /// will crash the database parser. It must be escaped as `` `type` `` in MySQL or `"type"` in Postgres/SQLite.
+    /// 
+    /// Note: For Postgres and SQLite, we escape the quotes with backslashes (`\"`) because this output
+    /// is directly injected into the generated Rust string literals (e.g., `let query = "SELECT ...";`).
     fn escape_sql_col(&self, name: &str) -> String {
         const SQL_KEYWORDS: &[&str] = &[
             "type", "match", "order", "group", "select", "insert", "update", "delete",
@@ -58,7 +77,9 @@ impl DbDialect {
     }
 }
 
-// --- STRUCTURES DE MÉTADONNÉES ---
+// --- METADATA STRUCTURES ---
+// These structures represent the in-memory schema parsed from the database.
+// They act as the Universal Intermediate Representation (IR) before Rust code is generated.
 
 #[derive(Debug, Clone)]
 pub struct Column {
@@ -84,8 +105,13 @@ pub struct Table {
     pub indexes: Vec<Index>,
 }
 
-// --- GÉNÉRATEUR ---
+// --- GENERATOR ---
 
+/// The main orchestrator for generating the DAO layer.
+/// 
+/// **Usage:** You instantiate this in your `build.rs` script, providing the database URL.
+/// When you run `cargo build`, it automatically connects to the database, introspects the schema,
+/// and writes the generated `.rs` files into your project source directory.
 pub struct DaoxGenerator {
     database_url: String,
     output_dir: String,
@@ -373,8 +399,14 @@ impl DaoxGenerator {
     }
 }
 
-// --- TRADUCTION DES TYPES SQL EN TYPES RUST (Unifié) ---
+// --- TRANSLATING SQL TYPES TO RUST TYPES ---
 
+/// Maps database-specific SQL types to strongly-typed Rust native types.
+/// 
+/// **Dialect Specifics:**
+/// - `SQLite`: `INTEGER` is always mapped to `i64` because SQLite uses 64-bit signed integers for its ROWID.
+/// - `Postgres/MySQL`: `INT` is safely mapped to `i32`, while `BIGINT` is mapped to `i64`.
+/// - `Dates/JSON`: Safely fall back to `chrono` types and `String` respectively.
 fn map_sql_type(sql_type: &str, is_nullable: bool, dialect: DbDialect) -> String {
     let rust_type = match sql_type.to_lowercase().as_str() {
         // Entiers — SQLite INTEGER est toujours 64-bit (rowid)
@@ -411,6 +443,11 @@ fn map_sql_type(sql_type: &str, is_nullable: bool, dialect: DbDialect) -> String
     }
 }
 
+/// Escapes Rust reserved keywords using the `r#` syntax.
+/// 
+/// **Why this matters:** If a database column is named `type` or `match`, you cannot create a Rust
+/// struct with a field named `type` because it won't compile. This function detects reserved keywords
+/// and converts them to `r#type`, allowing the Rust compiler to accept them as valid identifiers.
 fn escape_rust_keyword(name: &str) -> String {
     const KEYWORDS: &[&str] = &[
         "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn",

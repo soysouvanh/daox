@@ -24,15 +24,16 @@ async fn main() -> Result<(), sqlx::Error> {
 }
 
 /// ========================================================================
-/// 🐘 DÉMONSTRATION EXHAUSTIVE DE LA LIBRAIRIE DAO (POSTGRESQL)
-/// Ce code sert de documentation officielle pour les cas d'usage avancés.
+/// 🐘 EXHAUSTIVE DEMONSTRATION OF THE DAO LIBRARY (POSTGRESQL)
+/// This code serves as the official documentation for all advanced Use Cases.
 /// ========================================================================
 async fn run_postgres() -> Result<(), sqlx::Error> {
     use models_pg::users::{Users, UsersPatch};
     use models_pg::order_items::OrderItems;
     use futures::StreamExt; // Nécessaire pour traiter les Streams asynchrones
     
-    // 1. Connexion au moteur PostgreSQL
+    // 1. Connect to the PostgreSQL engine using SQLx connection pooling
+
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect("postgres://root:root@localhost:5433/daox_test")
@@ -42,51 +43,65 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
     println!("🐘 DÉMONSTRATION COMPLÈTE DAO SUR POSTGRESQL");
     println!("=====================================================\n");
 
-    // Nettoyage initial des tables pour l'environnement de test
+    // Initial cleanup of tables to ensure a clean test environment
+
     sqlx::query("TRUNCATE TABLE users RESTART IDENTITY CASCADE").execute(&pool).await?;
     sqlx::query("TRUNCATE TABLE order_items CASCADE").execute(&pool).await?;
 
-    // --- CAS N°1 : INSERTION & LECTURE CLASSIQUE ---
-    println!("🚀 1. Insertion simple (Insert)");
+    // --- USE CASE 1: CLASSIC INSERTION & READING ---
+
+    println!("🚀 1. Simple Insertion (Insert)");
     let user1 = Users {
-        id: 0, // Ignoré par PostgreSQL car défini en BIGSERIAL (Identité)
+        id: 0, // Ignored by PostgreSQL because it is defined as BIGSERIAL (Identity)
+
         email: "alice@daox.dev".into(),
         first_name: Some("Alice".into()),
         last_name: "Wonder".into(),
         status: "active".into(),
-        created_at: None, // Automatiquement rempli par la base (DEFAULT CURRENT_TIMESTAMP)
+        created_at: None, // Automatically populated by the DB (DEFAULT CURRENT_TIMESTAMP)
+
     };
     let user1_id = user1.insert(&pool).await?;
     println!("   ✅ Utilisateur inséré avec l'ID auto-généré : {}", user1_id);
 
-    // EXISTS : Vérification ultra-rapide (SELECT 1) sans charger les données en RAM
+    // EXISTS: Ultra-fast existence check (SELECT 1) without loading full row data into RAM
+
     let exists = Users::exists_by_pk(&pool, &(user1_id as i64)).await?;
     println!("   ✅ Vérification exists_by_pk : {}", exists);
 
-    // --- CAS N°2 : UPSERT (Insérer ou Mettre à jour) ---
-    println!("\n🔄 2. Mise à jour automatique (Upsert)");
+    // --- USE CASE 2: UPSERT (Insert or Update) ---
+    // Safely insert data, or update it if a Unique Constraint (e.g., email) is violated.
+
+    println!("\n🔄 2. Automatic Update (Upsert)");
     let mut user1_modified = user1.clone();
     user1_modified.id = user1_id as i64;
     user1_modified.last_name = "Wonderland".into();
-    // La méthode génère intelligemment un "ON CONFLICT DO UPDATE" ou "ON DUPLICATE KEY" selon le dialecte
+    // The method intelligently generates an "ON CONFLICT DO UPDATE" or "ON DUPLICATE KEY" based on the dialect
+
     user1_modified.upsert(&pool).await?;
     
     let check_upsert = Users::get_by_pk(&pool, &(user1_id as i64)).await?.unwrap();
     println!("   ✅ Nom correctement mis à jour via Upsert : {}", check_upsert.last_name);
 
-    // --- CAS N°3 : UPDATE PARTIEL OPTIMISÉ (Patch) ---
-    println!("\n🩹 3. Mise à jour partielle (Patch)");
+    // --- USE CASE 3: OPTIMIZED PARTIAL UPDATE (Patch) ---
+    // Only updates the exact columns you specify, saving network bandwidth and DB disk writes.
+
+    println!("\n🩹 3. Partial Update (Patch)");
     let patch = UsersPatch {
-        first_name: Some(None), // 💡 Magie : On utilise un Some(None) pour forcer explicitement la colonne à NULL
+        first_name: Some(None), // 💡 Magic: We use `Some(None)` to explicitly force the column to NULL
+
         status: Some("banned".into()),
-        ..Default::default() // Les autres colonnes (email, last_name) seront ignorées dans le UPDATE final
+        ..Default::default() // All other columns (email, last_name) will be completely omitted from the final UPDATE query
+
     };
     Users::update_partial_by_pk(&pool, &(user1_id as i64), &patch).await?;
     let check_patch = Users::get_by_pk(&pool, &(user1_id as i64)).await?.unwrap();
     println!("   ✅ Statut: '{}', Prénom mis à jour: {:?}", check_patch.status, check_patch.first_name);
 
-    // --- CAS N°4 : BATCH INSERTION (Performances extrêmes) ---
-    println!("\n📦 4. Insertion en masse (Batch Insert)");
+    // --- USE CASE 4: BATCH INSERTION (Extreme Performance) ---
+    // Inserts an array of objects in a single database round-trip.
+
+    println!("\n📦 4. Mass Insertion (Batch Insert)");
     let mut batch_users = Vec::new();
     for i in 1..=50 {
         batch_users.push(Users {
@@ -98,32 +113,37 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
             created_at: None,
         });
     }
-    // Génère une unique requête SQL massive : INSERT INTO users (...) VALUES (...), (...), (...)
+    // Generates a single massive SQL query: INSERT INTO users (...) VALUES (...), (...), (...)
+
     let rows_inserted = Users::insert_batch(&pool, &batch_users).await?;
     println!("   ✅ {} utilisateurs insérés en UNE SEULE requête SQL !", rows_inserted);
 
-    // --- CAS N°5 : PAGINATION KEYSET (Ordre de complexité O(1)) ---
-    println!("\n⏭️  5. Pagination ultra-rapide par Curseur (Keyset)");
-    // Idéal pour les APIs : Au lieu d'utiliser OFFSET (lent), on utilise le dernier ID connu
+    // --- USE CASE 5: KEYSET PAGINATION (O(1) Absolute Performance) ---
+    println!("\n⏭️  5. Cursor-based Keyset Pagination");
+    // Ideal for REST APIs: Instead of using OFFSET (which scans and discards rows), we jump straight to the last known ID.
+
     let page = Users::list_by_cursor(&pool, &20, 5).await?;
     println!("   ✅ {} utilisateurs récupérés juste après l'ID 20.", page.len());
     for u in page {
         println!("      - Utilisateur lu : ID {}, Email {}", u.id, u.email);
     }
 
-    // --- CAS N°6 : STREAMING SANS ALLOCATION RAM ---
-    println!("\n🌊 6. Lecture en continu (Streaming asynchrone)");
+    // --- USE CASE 6: ZERO-ALLOCATION ASYNC STREAMING ---
+    println!("\n🌊 6. Asynchronous Streaming");
+
     let mut stream = Users::stream_all(&pool);
     let mut stream_count = 0;
     while let Some(user_result) = stream.next().await {
         let _u = user_result?;
         stream_count += 1;
-        // 💡 Ici on pourrait traiter des millions de lignes de BDD sans jamais faire exploser la RAM du serveur
+        // 💡 Here we could process millions of database rows without ever blowing up the server's RAM!
+
     }
     println!("   ✅ {} utilisateurs itérés avec une empreinte mémoire quasi-nulle.", stream_count);
 
-    // --- CAS N°7 : CLÉS PRIMAIRES COMPOSITES (Sécurité absolue) ---
-    println!("\n🗝️  7. Gestion avancée : Clé Primaire Composite");
+    // --- USE CASE 7: COMPOSITE PRIMARY KEYS (Absolute Type Safety) ---
+    println!("\n🗝️  7. Advanced: Composite Primary Keys");
+
     let item = OrderItems {
         order_id: 101,
         product_id: 42,
@@ -132,18 +152,21 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
     item.insert(&pool).await?;
     println!("   ✅ Article ajouté au panier (Commande: 101, Produit: 42)");
     
-    // Daox détecte les PK multiples et demande TOUS les identifiants en paramètre
+    // Daox detects multiple PKs and strictly requires ALL identifiers in the method signature to prevent accidents
+
     let item_check = OrderItems::get_by_pk(&pool, &101, &42).await?.unwrap();
     println!("   ✅ Lecture sécurisée réussie (Quantité: {})", item_check.quantity);
 
-    // Suppression ciblée (Ne supprime surtout pas toute la commande !)
+    // Targeted deletion (Guarantees we don't accidentally delete the entire order!)
+
     OrderItems::delete_by_pk(&pool, &101, &42).await?;
     let deleted_item = OrderItems::get_by_pk(&pool, &101, &42).await?;
     println!("   ✅ Suppression de l'article spécifique réussie (Encore présent ? {})", deleted_item.is_some());
 
-    // --- CAS N°8 : BATCH DELETE ---
-    println!("\n🗑️  8. Suppression en masse (Batch Delete)");
-    // Supprime de nombreux IDs d'un seul coup via un puissant WHERE id IN (?, ?, ?)
+    // --- USE CASE 8: BATCH DELETE ---
+    println!("\n🗑️  8. Batch Deletion");
+    // Deletes multiple IDs instantly via a powerful `WHERE id IN (?, ?, ?)` clause
+
     let ids_to_delete = vec![10, 11, 12, 13, 14];
     let deleted_rows = Users::delete_many_by_pk(&pool, &ids_to_delete).await?;
     println!("   ✅ {} utilisateurs supprimés d'un seul coup !\n", deleted_rows);
@@ -153,8 +176,8 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
 }
 
 /// ========================================================================
-/// 🐬 DÉMONSTRATION EXHAUSTIVE DE LA LIBRAIRIE DAO (MYSQL / MARIADB)
-/// Identique au code PostgreSQL, prouvant la portabilité absolue du code.
+/// 🐬 EXHAUSTIVE DEMONSTRATION OF THE DAO LIBRARY (MYSQL / MARIADB)
+/// Identical to the PostgreSQL code, proving the absolute portability of the code.
 /// ========================================================================
 async fn run_mysql() -> Result<(), sqlx::Error> {
     use models_mysql::users::{Users, UsersPatch};
@@ -167,13 +190,13 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
         .await?;
 
     println!("=====================================================");
-    println!("🐬 DÉMONSTRATION COMPLÈTE DAO SUR MYSQL/MARIADB");
+    println!("🐬 EXHAUSTIVE DAO DEMONSTRATION ON MYSQL/MARIADB");
     println!("=====================================================\n");
 
     sqlx::query("TRUNCATE TABLE users").execute(&pool).await?;
     sqlx::query("TRUNCATE TABLE order_items").execute(&pool).await?;
 
-    println!("🚀 1. Insertion simple (Insert)");
+    println!("🚀 1. Simple Insertion (Insert)");
     let user1 = Users {
         id: 0, 
         email: "bob@daox.dev".into(),
@@ -188,7 +211,7 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
     let exists = Users::exists_by_pk(&pool, &(user1_id as i64)).await?;
     println!("   ✅ Vérification exists_by_pk : {}", exists);
 
-    println!("\n🔄 2. Mise à jour automatique (Upsert)");
+    println!("\n🔄 2. Automatic Update (Upsert)");
     let mut user1_modified = user1.clone();
     user1_modified.id = user1_id as i64;
     user1_modified.last_name = "Le Bricoleur".into();
@@ -196,7 +219,7 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
     let check_upsert = Users::get_by_pk(&pool, &(user1_id as i64)).await?.unwrap();
     println!("   ✅ Nom correctement mis à jour via Upsert : {}", check_upsert.last_name);
 
-    println!("\n🩹 3. Mise à jour partielle (Patch)");
+    println!("\n🩹 3. Partial Update (Patch)");
     let patch = UsersPatch {
         first_name: Some(None),
         status: Some("inactive".into()),
@@ -206,7 +229,7 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
     let check_patch = Users::get_by_pk(&pool, &(user1_id as i64)).await?.unwrap();
     println!("   ✅ Statut: '{}', Prénom mis à jour: {:?}", check_patch.status, check_patch.first_name);
 
-    println!("\n📦 4. Insertion en masse (Batch Insert)");
+    println!("\n📦 4. Mass Insertion (Batch Insert)");
     let mut batch_users = Vec::new();
     for i in 1..=50 {
         batch_users.push(Users {
@@ -221,11 +244,11 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
     let rows_inserted = Users::insert_batch(&pool, &batch_users).await?;
     println!("   ✅ {} utilisateurs insérés en UNE SEULE requête SQL !", rows_inserted);
 
-    println!("\n⏭️  5. Pagination ultra-rapide par Curseur (Keyset)");
+    println!("\n⏭️  5. Cursor-based Keyset Pagination");
     let page = Users::list_by_cursor(&pool, &20, 5).await?;
     println!("   ✅ {} utilisateurs récupérés juste après l'ID 20.", page.len());
 
-    println!("\n🌊 6. Lecture en continu (Streaming asynchrone)");
+    println!("\n🌊 6. Asynchronous Streaming");
     let mut stream = Users::stream_all(&pool);
     let mut stream_count = 0;
     while let Some(user_result) = stream.next().await {
@@ -234,7 +257,7 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
     }
     println!("   ✅ {} utilisateurs itérés avec une empreinte mémoire quasi-nulle.", stream_count);
 
-    println!("\n🗝️  7. Gestion avancée : Clé Primaire Composite");
+    println!("\n🗝️  7. Advanced: Composite Primary Keys");
     let item = OrderItems { order_id: 200, product_id: 99, quantity: 2 };
     item.insert(&pool).await?;
     println!("   ✅ Article ajouté au panier (Commande: 200, Produit: 99)");
@@ -244,7 +267,7 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
     let deleted_item = OrderItems::get_by_pk(&pool, &200, &99).await?;
     println!("   ✅ Suppression réussie (Encore présent ? {})", deleted_item.is_some());
 
-    println!("\n🗑️  8. Suppression en masse (Batch Delete)");
+    println!("\n🗑️  8. Batch Deletion");
     let ids_to_delete = vec![10, 11, 12, 13, 14];
     let deleted_rows = Users::delete_many_by_pk(&pool, &ids_to_delete).await?;
     println!("   ✅ {} utilisateurs supprimés d'un seul coup !\n", deleted_rows);
@@ -254,7 +277,7 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
 }
 
 /// ========================================================================
-/// 🪶 DÉMONSTRATION EXHAUSTIVE DE LA LIBRAIRIE DAO (SQLITE)
+/// 🪶 EXHAUSTIVE DEMONSTRATION OF THE DAO LIBRARY (SQLITE)
 /// ========================================================================
 async fn run_sqlite() -> Result<(), sqlx::Error> {
     use models_sqlite::users::{Users, UsersPatch};
@@ -267,10 +290,10 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
         .await?;
 
     println!("=====================================================");
-    println!("🪶 DÉMONSTRATION COMPLÈTE DAO SUR SQLITE");
+    println!("🪶 EXHAUSTIVE DAO DEMONSTRATION ON SQLITE");
     println!("=====================================================\n");
 
-    println!("🚀 1. Insertion simple (Insert)");
+    println!("🚀 1. Simple Insertion (Insert)");
     let user1 = Users {
         id: 0, 
         email: "alice@sqlite.dev".into(),
@@ -285,7 +308,7 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
     let exists = Users::exists_by_pk(&pool, &(user1_id as i64)).await?;
     println!("   ✅ Vérification exists_by_pk : {}", exists);
 
-    println!("\n🔄 2. Mise à jour automatique (Upsert)");
+    println!("\n🔄 2. Automatic Update (Upsert)");
     let mut user1_modified = user1.clone();
     user1_modified.id = user1_id as i64;
     user1_modified.last_name = "Embedded".into();
@@ -293,7 +316,7 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
     let check_upsert = Users::get_by_pk(&pool, &(user1_id as i64)).await?.unwrap();
     println!("   ✅ Nom correctement mis à jour via Upsert : {}", check_upsert.last_name);
 
-    println!("\n🩹 3. Mise à jour partielle (Patch)");
+    println!("\n🩹 3. Partial Update (Patch)");
     let patch = UsersPatch {
         first_name: Some(None),
         status: Some("inactive".into()),
@@ -303,7 +326,7 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
     let check_patch = Users::get_by_pk(&pool, &(user1_id as i64)).await?.unwrap();
     println!("   ✅ Statut: '{}', Prénom mis à jour: {:?}", check_patch.status, check_patch.first_name);
 
-    println!("\n📦 4. Insertion en masse (Batch Insert)");
+    println!("\n📦 4. Mass Insertion (Batch Insert)");
     let mut batch_users = Vec::new();
     for i in 1..=50 {
         batch_users.push(Users {
@@ -318,11 +341,11 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
     let rows_inserted = Users::insert_batch(&pool, &batch_users).await?;
     println!("   ✅ {} utilisateurs insérés en UNE SEULE requête SQL !", rows_inserted);
 
-    println!("\n⏭️  5. Pagination ultra-rapide par Curseur (Keyset)");
+    println!("\n⏭️  5. Cursor-based Keyset Pagination");
     let page = Users::list_by_cursor(&pool, &20, 5).await?;
     println!("   ✅ {} utilisateurs récupérés juste après l'ID 20.", page.len());
 
-    println!("\n🌊 6. Lecture en continu (Streaming asynchrone)");
+    println!("\n🌊 6. Asynchronous Streaming");
     let mut stream = Users::stream_all(&pool);
     let mut stream_count = 0;
     while let Some(user_result) = stream.next().await {
@@ -331,7 +354,7 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
     }
     println!("   ✅ {} utilisateurs itérés avec une empreinte mémoire quasi-nulle.", stream_count);
 
-    println!("\n🗝️  7. Gestion avancée : Clé Primaire Composite");
+    println!("\n🗝️  7. Advanced: Composite Primary Keys");
     let item = OrderItems { order_id: 300, product_id: 99, quantity: 2 };
     item.insert(&pool).await?;
     println!("   ✅ Article ajouté au panier (Commande: 300, Produit: 99)");
@@ -341,7 +364,7 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
     let deleted_item = OrderItems::get_by_pk(&pool, &300, &99).await?;
     println!("   ✅ Suppression réussie (Encore présent ? {})", deleted_item.is_some());
 
-    println!("\n🗑️  8. Suppression en masse (Batch Delete)");
+    println!("\n🗑️  8. Batch Deletion");
     let ids_to_delete = vec![10, 11, 12, 13, 14];
     let deleted_rows = Users::delete_many_by_pk(&pool, &ids_to_delete).await?;
     println!("   ✅ {} utilisateurs supprimés d'un seul coup !\n", deleted_rows);
