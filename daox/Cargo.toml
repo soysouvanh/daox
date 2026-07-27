@@ -10,14 +10,15 @@ repository = "https://github.com/soysouvanh/daox"
 keywords = ["dao", "sqlx", "codegen", "database", "orm"]
 categories = ["database", "development-tools"]
 
+[features]
+default = ["mysql"]
+mysql = ["sqlx/mysql"]
+postgres = ["sqlx/postgres"]
+sqlite = ["sqlx/sqlite"]
+
 [dependencies]
 # Database introspection (MySQL/MariaDB, PostgreSQL, SQLite)
-sqlx = { version = "0.8", features = [
-    "mysql",
-    "postgres",
-    "sqlite",
-    "runtime-tokio-rustls",
-] }
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls"] }
 tokio = { version = "1", features = ["full"] }
 
 # Name conversion (e.g., snake_case -> PascalCase for struct names)
@@ -25,3 +26,7 @@ heck = "0.5"
 
 # Clean error handling with context propagation
 anyhow = "1.0"
+toml = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+regex = "1.10"

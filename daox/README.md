@@ -1,4 +1,4 @@
-# Daox 🚀
+# Daox
 
 [![Crates.io](https://img.shields.io/crates/v/daox.svg)](https://crates.io/crates/daox)
 [![Documentation](https://docs.rs/daox/badge.svg)](https://docs.rs/daox)
@@ -6,77 +6,80 @@
 
 **Daox** is a highly optimized, zero-overhead, database-first Data Access Object (DAO) generator for Rust.
 
-It connects to your database at **compile time** (via `build.rs`), introspects your existing schema, and generates strongly-typed Rust structs and highly efficient asynchronous CRUD methods.
+By connecting to your database at **compile time** (via `build.rs`), Daox introspects your existing schema and generates strongly-typed Rust structures alongside highly efficient, asynchronous CRUD methods.
 
-Supports **PostgreSQL**, **MySQL/MariaDB**, and **SQLite**.
-
----
-
-## 🔥 Why Daox?
-
-Most Rust ORMs (like Diesel or SeaORM) force you to maintain complex Rust macros or schema definitions that must perfectly match your database.
-
-**Daox flips this on its head:**
-
-1. You design your database using pure SQL (Database-first).
-2. Daox reads your live database at compile time.
-3. Daox generates the Rust boilerplate for you.
-
-### State of the Art (SOTA) Features
-
-- 🚀 **Zero-Overhead:** Powered directly by `sqlx`. No heavy ORM abstractions.
-- ⚡ **O(1) Keyset Pagination:** Native Cursor-based pagination (`list_by_cursor`) that destroys `OFFSET` performance bottlenecks.
-- 🌊 **Zero-Allocation Streams:** Process millions of rows efficiently via `stream_all()` without loading them into RAM.
-- 🩹 **Smart Patching:** Send partial network updates (`update_partial_by_pk`) to save bandwidth and DB disk writes (WAL).
-- 🛡️ **Dialect-Aware & Injection Safe:** Fully escapes reserved SQL keywords (`type`, `order`) and uses prepared statements to prevent SQL injections.
-- 🗝️ **Composite Keys:** Full support for tables with multiple primary keys.
+> **Supported Databases:** PostgreSQL, MySQL/MariaDB, and SQLite.
 
 ---
 
-## 🧪 The Official Test & Demo Project
+## Architecture & data lifecycle
 
-If you prefer learning by example, we highly recommend cloning the GitHub repository and exploring the **`daox-test`** directory. 
+Most traditional ORMs (like Diesel or SeaORM) force you to manually define Rust macros or structs, which you must carefully maintain to match your database. **Daox flips this paradigm.**
 
-It is a complete, ready-to-use demonstration project that includes a `docker-compose.yml` (for PostgreSQL and MySQL) and exhaustively tests every Daox feature across all 3 SQL dialects. It's the perfect playground to learn the framework!
+Here is the **Database-first** approach visualized:
+
+![Architecture & data lifecycle](./assets/architecture.svg)
+
+### Why Daox? (State of the art features)
+
+- **Zero-overhead:** Powered directly by `sqlx`. No heavy ORM abstractions are loaded at runtime.
+- **O(1) keyset pagination:** Native Cursor-based pagination (`list_by_cursor`) that destroys `OFFSET` performance bottlenecks.
+
+![O(1) keyset pagination vs OFFSET](./assets/pagination.svg)
+
+- **Zero-allocation streams:** Process millions of rows efficiently via `stream_all()` without loading them into RAM.
+
+![Zero-allocation streams](./assets/streams.svg)
+
+- **Smart patching:** Send partial network updates (`update_partial_by_pk`) to save bandwidth and reduce database disk writes (WAL).
+- **Dialect-aware & injection safe:** Fully escapes reserved SQL keywords and uses prepared statements to strictly prevent SQL injections.
+- **Composite keys:** Full native support for tables with multiple primary keys.
 
 ---
 
-## 🎓 Step-by-Step Guide (For Rust Novices)
+## The official test & demo project
 
-If you are starting from scratch, this step-by-step guide will walk you through exactly how Daox works, from installation to execution.
+If you prefer learning by reading code, we highly recommend cloning the GitHub repository and exploring the **`daox-test`** directory.
 
-### Step 1: Create a Project & Configuration (`Cargo.toml`)
+It is a complete, ready-to-use demonstration project that includes a `docker-compose.yml` (for PostgreSQL and MySQL) and exhaustively tests every Daox feature across all 3 SQL dialects. It is the perfect playground to safely learn the framework!
+
+---
+
+## Step-by-step guide (for Rust novices)
+
+This step-by-step guide walks you through the entire Daox workflow, from installation to execution.
+
+### Step 1: Create a project & configuration
 
 First, create a brand new Rust project in your terminal:
+
 ```bash
 cargo new my_app
 cd my_app
 ```
 
-In Rust, `Cargo.toml` is the configuration file where you declare your project's dependencies.
-Daox is unique because it needs to generate code **before** your actual application compiles. Therefore, it is added as a `build-dependency`.
+In Rust, `Cargo.toml` is the configuration file where you declare dependencies. Since Daox generates code **before** your application compiles, it is added as a `build-dependency`.
 
-Open your `Cargo.toml` and add the following to pull the library directly from `crates.io`:
+Open your `Cargo.toml` and add the following:
 
 ```toml
 [dependencies]
-# SQLx handles the actual database connection at runtime in your app
+# sqlx handles the actual database connection at runtime
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "mysql", "postgres", "sqlite"] }
-# Futures is required to use Daox's asynchronous streams
-futures = "0.3" 
+# futures is required to handle Daox's asynchronous data streams
+futures = "0.3"
 
 [build-dependencies]
 # Daox runs at compile-time to generate your DAO code
 daox = "0.1.0"
-# Tokio provides the asynchronous runtime needed by Daox to connect to the DB
+# Tokio provides the asynchronous runtime needed by Daox during generation
 tokio = { version = "1", features = ["full"] }
 ```
 
-### Step 2: Prepare Your Database Schema
+### Step 2: Prepare your database schema
 
-Because Daox is "Database-first", your database and its tables must exist **before** you compile your code. Daox needs to read them to generate the Rust models.
+Because Daox is "Database-first", your database and tables must exist **before** compilation. Ensure you have a running database and create this simple table (example for PostgreSQL):
 
-For this guide, ensure you have a database running and create this simple table (e.g., in PostgreSQL):
 ```sql
 CREATE TABLE users (
     id BIGSERIAL PRIMARY KEY,
@@ -85,99 +88,78 @@ CREATE TABLE users (
 );
 ```
 
-### Step 3: The Code Generator (`build.rs`)
+### Step 3: The code generator (`build.rs`)
 
-In Rust, if you create a file named `build.rs` at the root of your project (next to `Cargo.toml`), Cargo will automatically execute it **before** compiling your main code.
-This is where Daox shines: it connects to your live database, reads the schema, and creates the Rust files.
+If you create a file named `build.rs` at the root of your project, Cargo automatically executes it before compiling the rest of your code. We use this file to trigger Daox.
 
-Create a `build.rs` file at the root of your project:
+Create `build.rs` at the root:
 
 ```rust
 use std::fs;
 use std::path::Path;
 
-#[tokio::main] // Required because database connections are asynchronous
+#[tokio::main]
 async fn main() {
-    // 1. Tell Cargo to re-run this script ONLY if build.rs changes
+    // 1. Tell Cargo to trigger recompilation only if build.rs changes
     println!("cargo:rerun-if-changed=build.rs");
-    
-    // 2. Define your database URL (make sure your DB is running and the table exists!)
-    // 👉 PostgreSQL: "postgres://user:pass@localhost:5432/my_database"
-    // 👉 MySQL:      "mysql://user:pass@localhost:3306/my_database"
-    // 👉 SQLite:     "sqlite://my_database.sqlite"
+
+    // 2. Define your database URL
     let db_url = "postgres://user:pass@localhost:5432/my_database";
-    
-    // 3. Define where Daox should save the generated Rust files
+
+    // 3. Define where Daox should output the generated Rust files
     let output_dir = "src/models";
-    if !Path::new(output_dir).exists() { 
-        fs::create_dir_all(output_dir).unwrap(); 
+    if !Path::new(output_dir).exists() {
+        fs::create_dir_all(output_dir).unwrap();
     }
 
-    // 4. Connect to the DB, read the schema, and generate the files!
+    // 4. Connect to the DB, read the schema, and generate!
     let generator = daox::DaoxGenerator::new(db_url, output_dir);
     generator.generate().await.expect("Failed to generate DAOs");
 }
 ```
 
-### Step 4: Trigger the Generation (`cargo build`)
+### Step 4: Trigger the generation
 
-Before writing your application code, you need Daox to generate the models.
-Open your terminal and run:
+Generate the models by compiling your project in the terminal:
 
 ```bash
 cargo build
 ```
 
-**What happens here?** 
-Cargo runs your `build.rs`. Daox connects to your database, analyzes your `users` table, and magically creates perfectly typed `.rs` files inside your `src/models/` folder (e.g., `users.rs`).
+> **What happens here?** Cargo runs `build.rs`. Daox connects to your database, deeply analyzes your `users` table, and cleanly generates perfectly typed files inside your `src/models/` folder.
 
-### Step 5: Your Application (`src/main.rs`)
+### Step 5: Your application (`src/main.rs`)
 
-Now that the DAOs are generated, you can use them in your main application logic. 
-Open `src/main.rs` and write your logic using the newly generated files.
-
-*(Note: Don't forget to declare the generated module using `pub mod models;` at the top of your file)*
+Everything is ready! Import the generated modules and use them in your main logic.
 
 ```rust
-pub mod models; // Tells Rust to include the folder generated by Daox
+pub mod models; // Explicitly include the generated module
 
-// Choose the right pool for your engine:
-use sqlx::postgres::PgPoolOptions; 
-// use sqlx::mysql::MySqlPoolOptions;
-// use sqlx::sqlite::SqlitePoolOptions;
-
-use futures::StreamExt; // Required to read data continuously (Streaming)
+use sqlx::postgres::PgPoolOptions;
+use futures::StreamExt; // Required for continuous data streams
 use models::users::{Users, UsersPatch}; // Import the generated structures
 
 #[tokio::main]
 async fn main() -> Result<(), sqlx::Error> {
     // 1. Open a connection pool to your database
-    // 👉 For PostgreSQL:
     let pool = PgPoolOptions::new().connect("postgres://user:pass@localhost:5432/my_database").await?;
-    
-    // 👉 For MySQL:
-    // let pool = MySqlPoolOptions::new().connect("mysql://user:pass@localhost:3306/my_database").await?;
-    
-    // 👉 For SQLite:
-    // let pool = SqlitePoolOptions::new().connect("sqlite://my_database.sqlite").await?;
 
     // --- CASE 1: CLASSIC INSERTION ---
     let new_user = Users {
-        id: 0, // Ignored by Daox if the column is auto-incremented
+        id: 0, // Automatically ignored by Daox for auto-incremented columns
         email: "alice@daox.dev".into(),
         status: "active".into(),
     };
     let user_id = new_user.insert(&pool).await?;
-    println!("User successfully inserted with ID: {}", user_id);
+    println!("Inserted User ID: {}", user_id);
 
-    // --- CASE 2: UPSERT (Insert or Update) ---
+    // --- CASE 2: UPSERT (Insert or Update on conflict) ---
     let mut modified_user = new_user.clone();
     modified_user.status = "banned".into();
-    // Automatically generates an 'ON CONFLICT DO UPDATE'
-    modified_user.upsert(&pool).await?; 
+    modified_user.upsert(&pool).await?;
 
-    // --- CASE 3: PARTIAL UPDATE (Patching) ---
-    // Update ONLY the status, ignoring the email to save network bandwidth
+    // --- CASE 3: SMART PATCHING (Partial Update) ---
+    // Update *only* the status. Daox will ignore the email field.
     let patch = UsersPatch {
         status: Some("inactive".into()),
         ..Default::default()
@@ -185,7 +167,7 @@ async fn main() -> Result<(), sqlx::Error> {
     Users::update_partial_by_pk(&pool, &(user_id as i64), &patch).await?;
 
     // --- CASE 4: ZERO-ALLOCATION STREAMING ---
-    println!("Reading all users without overloading the RAM...");
+    // Iterates cleanly without overflowing the system's memory
     let mut stream = Users::stream_all(&pool);
     while let Some(user_result) = stream.next().await {
         let user = user_result?;
@@ -196,145 +178,94 @@ async fn main() -> Result<(), sqlx::Error> {
 }
 ```
 
-### Step 6: Run Your Code (`cargo run`)
+### Step 6: Run your code
 
-You're done! Execute your program by typing:
+Run your application:
 
 ```bash
 cargo run
 ```
 
-Your Rust application will compile and interact seamlessly with your database. You should see the following output in your terminal:
+---
 
-```text
-User successfully inserted with ID: 1
-Reading all users without overloading the RAM...
-Found user: alice@daox.dev
-```
+## Generated methods overview & use cases
 
-Congratulations! You have successfully built a highly optimized, type-safe Rust application using Daox.
+Daox understands your schema intimately. Based on your columns and indexes, it generates dedicated, structurally sound methods.
+
+### Global table methods
+
+- **`count(executor)`** ➔ Total table row count. _(Ideal for admin KPIs)_
+- **`stream_all(executor)`** ➔ Zero-allocation row streaming. _(Crucial for exporting Big Data or background migrations)_
+- **`list_paginated(executor, order, page, size)`** ➔ Traditional pagination. _(For internal data-grids)_
+
+### Write methods
+
+- **`insert(&self, executor)`** ➔ Insert the struct and get the generated ID.
+- **`insert_batch(executor, &[Self])`** ➔ High-performance mass ingestion.
+- **`upsert(&self, executor)`** ➔ Insert, or powerfully update if a unique conflict occurs.
+
+### Primary key (PK) driven methods
+
+- **`get_by_pk(executor, pk)`** ➔ Fetch one precise record.
+- **`exists_by_pk(executor, pk)`** ➔ Ultra-fast cache-friendly verify without pulling the full row.
+- **`update_by_pk(&self, executor)`** ➔ Fully overwrite the database record.
+- **`update_partial_by_pk(executor, pk, &Patch)`** ➔ Efficient partial field patching (saves WAL storage!).
+- **`delete_by_pk(executor, pk)`** ➔ Single record deletion.
+- **`delete_many_by_pk(executor, &[pk])`** ➔ Scalable mass deletion.
+- **`list_by_cursor(executor, last_id, limit)`** ➔ The SOTA **O(1) keyset pagination** for infinite scrolling feeds.
+
+### Auto-generated index methods
+
+Daox scans your DB indexes and maps perfectly optimized query methods.
+_(For example, an index on `email`)_
+
+- **`exists_by_<index>`** ➔ Example: **`exists_by_email`**
+- **`get_by_<index>`** ➔ _(For UNIQUE indexes)_ Example: **`get_by_email`**
+- **`list_by_<index>`** ➔ _(For standard indexes)_ Retrieve multiple matches.
+- **`stream_by_<index>`** ➔ Stream matches safely.
+- **`delete_by_<index>`** ➔ Efficient targeted deletion based on an index.
 
 ---
 
-## 🛠️ Generated Methods Overview (API Reference & Use Cases)
+## Advanced interaction models
 
-For every table, Daox automatically generates a comprehensive set of strongly-typed methods. Below is the detailed API reference with practical use cases.
+### 1. Robust transactions
 
-### 🌍 Global Methods (Table-wide)
-
-- **`count(executor) -> Result<u64>`**  
-  Counts the total number of rows in the table.  
-  *Use case:* Displaying the total number of registered users on an admin dashboard. *(Note: Use thoughtfully on very large tables).*
-- **`stream_all(executor) -> BoxStream<Result<Self>>`**  
-  Creates a zero-allocation asynchronous stream to iterate over the entire table without loading everything into memory.  
-  *Use case:* Exporting 5 million users to a CSV file or running a heavy background migration without exploding your server's RAM.
-- **`list_paginated(executor, order_by, page, page_size) -> Result<Vec<Self>>`**  
-  Classic `OFFSET/LIMIT` pagination.  
-  *Use case:* Displaying a traditional data grid table in an internal back-office. Note: `order_by` must be strictly whitelisted by your application to prevent SQL injection.
-
-### ✍️ Write Methods
-
-- **`insert(&self, executor) -> Result<ID>`**  
-  Inserts the current struct instance into the database. Automatically returns the newly generated Primary Key (e.g., `i64` for auto-increment columns).  
-  *Use case:* Registering a new user who just filled out a signup form.
-- **`insert_batch(executor, &[Self]) -> Result<u64>`**  
-  High-performance mass insertion. Groups all structs into a single massive SQL query (`INSERT INTO ... VALUES (...), (...)`), returning the number of affected rows.  
-  *Use case:* Importing thousands of products from an external API or Excel file in a single database round-trip.
-- **`upsert(&self, executor) -> Result<()>`**  
-  Inserts the record, or **updates it** if a unique constraint (like a Primary Key or a UNIQUE index) is violated.  
-  *Use case:* Synchronizing external data where you don't know if the record already exists in your database or not.
-
-### 🗝️ Primary Key Methods
-
-These methods are strictly bound to your table's Primary Key(s). If your table has composite primary keys, Daox intelligently requires all of them in the method signature (e.g., `&id1, &id2`).
-
-- **`get_by_pk(executor, id) -> Result<Option<Self>>`**  
-  Retrieves a single record by its Primary Key. Returns `None` if the record doesn't exist.  
-  *Use case:* Fetching a specific user's profile data when they log in.
-- **`exists_by_pk(executor, id) -> Result<bool>`**  
-  Ultra-fast verification using `SELECT 1`. Does not load the actual row data.  
-  *Use case:* Checking if an item is still in the database before processing a payment, without wasting bandwidth downloading all its columns.
-- **`update_by_pk(&self, executor) -> Result<()>`**  
-  Fully replaces the database row with the current struct's data.  
-  *Use case:* Saving a user profile when the user has edited the entire form.
-- **`update_partial_by_pk(executor, id, &Patch) -> Result<()>`**  
-  Optimized partial update. Daox generates a companion `Patch` struct where every field is an `Option<Option<T>>`. Only the exact fields you specify are updated in the SQL query.  
-  *Use case:* Updating *only* the user's `status` to "banned", without sending the `email` or `password_hash` back over the network (saves database I/O and WAL disk writes).
-- **`delete_by_pk(executor, id) -> Result<u64>`**  
-  Deletes the specific record and returns the number of affected rows (usually 1).  
-  *Use case:* A user deleting their account permanently.
-- **`delete_many_by_pk(executor, &[id]) -> Result<u64>`**  
-  Bulk deletion using a powerful `WHERE id IN (?, ?)` clause.  
-  *Use case:* An administrator selecting 50 spam accounts via checkboxes and clicking "Delete All".
-- **`list_by_cursor(executor, last_id, limit) -> Result<Vec<Self>>`**  
-  The SOTA standard for API pagination (Keyset Pagination). Scans the B-Tree index directly from `last_id`, offering absolute `O(1)` performance regardless of table size.  
-  *Use case:* Implementing an "Infinite Scroll" timeline (like Twitter or Facebook) that stays blazing fast even with billions of rows, unlike traditional `OFFSET`.
-
-### 🔍 Index Methods (Dynamically Generated)
-
-Daox introspects your database indexes and automatically creates specific methods for them. Replace `<index>` with the actual name of your index or column.
-
-- **`exists_by_<index>(executor, cols...) -> Result<bool>`**  
-  Fast existence check using the indexed columns.  
-  *Use case:* Checking if an `email` is already taken during user registration.
-- **`get_by_<index>(executor, cols...) -> Result<Option<Self>>`** *(Generated only for UNIQUE indexes)*  
-  Retrieves a single record since the index guarantees uniqueness.  
-  *Use case:* Finding the user `get_by_email` during the login process.
-- **`list_by_<index>(executor, cols...) -> Result<Vec<Self>>`** *(Generated for non-unique indexes)*  
-  Retrieves all matching records.  
-  *Use case:* Retrieving all orders for a specific `user_id` (`list_by_user_id`).
-- **`stream_by_<index>(executor, cols...) -> BoxStream<Result<Self>>`** *(Generated for non-unique indexes)*  
-  Streams all matching records without allocating RAM.  
-  *Use case:* Processing millions of logs tied to a specific `tenant_id`.
-- **`update_by_<index>(&self, executor) -> Result<()>`**  
-  Updates rows that match the index criteria.  
-  *Use case:* Changing the `status` of all sessions tied to a compromised `user_id`.
-- **`delete_by_<index>(executor, cols...) -> Result<u64>`**  
-  Deletes all rows matching the index criteria.  
-  *Use case:* Deleting all shopping cart items (`delete_by_cart_id`) once the checkout is complete.
-
----
-
-## 🚀 Advanced Features
-
-### 1. Full Transaction Support
-Because every Daox method accepts an `executor` (which implements `sqlx::Executor`), you are not restricted to passing a database pool (`&pool`). You can seamlessly pass a transaction to perform atomic operations:
+Every generated Daox method inherently accepts an `executor` trait. You are not forced to pass the standard `&pool`; you can easily perform transaction-grouped atomic operations:
 
 ```rust
 let mut tx = pool.begin().await?;
 
-// Both methods will execute within the exact same database transaction
-let new_user = Users { id: 0, email: "bob@daox.dev".into(), status: "active".into() };
+// Executes cleanly under the same transaction envelope
 let user_id = new_user.insert(&mut *tx).await?;
-
 Users::delete_by_pk(&mut *tx, &(user_id as i64)).await?;
 
-tx.commit().await?; // Commit the transaction
+tx.commit().await?; // Commit database changes
 ```
 
-### 2. Immediate Autocompletion Sync
-Daox is purely Database-First. If you use a database migration tool (or manually add a column `phone_number` to your `users` table), simply run `cargo build` again. 
-Daox will instantly regenerate the models, and your IDE (VSCode, RustRover) will immediately propose `.phone_number` in its autocomplete suggestions. If a column is deleted or renamed in the database, your Rust code will immediately fail to compile, guaranteeing that your application is always perfectly synchronized with your live database schema.
+### 2. Immediate IDE typings / sync
+
+By integrating with `cargo build`, Daox ensures your Rust models match your database schema 1:1.
+
+If you rename a column, the next `cargo build` updates `src/models/*.rs` instantly. Code that uses the old column name will immediately **fail to compile**. This guarantees maximum robustness—your typed properties are always the single source of truth for the database layout.
 
 ---
 
-## 📁 Repository Structure
+## Repository structure
 
-If you are cloning this repository from GitHub to contribute or run the tests, you will notice a Cargo workspace containing two main folders:
-
-- **`daox/`**: The core generator library. This is the actual package that gets published to crates.io.
-- **`daox-test/`**: The integration test suite and demonstration application. It includes a `docker-compose.yml` to spin up PostgreSQL and MySQL instances, and executes the generated DAOs across all three SQL dialects to ensure absolute parity and prevent regressions.
+- **`daox/`**: The core framework code targeting `crates.io`.
+- **`daox-test/`**: The deep integration suite and learning playground testing identical behaviors across MySQL, Postgres, and SQLite simultaneously via Docker.
 
 ---
 
-## 👤 Author
+## Author
 
 **Vincent SOYSOUVANH**  
-_Skillwaker_
+_[Skillwaker](https://app.skillwaker.com)_
 
-- 🌐 [https://app.skillwaker.com](https://app.skillwaker.com)
-- 𝕏 [Twitter / X](https://x.com/skillwaker)
+- [LinkedIn](https://www.linkedin.com/in/vincentsoysouvanh/)
+- [Twitter / X](https://x.com/skillwaker)
 
-## 📝 License
+## License
 
 This project is licensed under the MIT License.

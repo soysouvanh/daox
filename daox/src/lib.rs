@@ -1,959 +1,1179 @@
-//! # Daox: Database-First DAO Generator
-//!
-//! This library provides a highly optimized, zero-overhead Data Access Object (DAO) generator for Rust.
-//! It introspects your existing database schema (MySQL, PostgreSQL, or SQLite) and generates strongly-typed
-//! Rust structs and methods (CRUD, pagination, streams, partial updates) at compile time.
-//!
-//! ## Architecture Overview
-//! 1. **Introspection:** The generator connects to the database via SQLx and reads the schema metadata to discover tables, columns, primary keys, and indexes.
-//! 2. **Code Generation:** For each table, it generates a Rust struct and implements highly efficient read/write operations.
-//! 3. **Dialect Awareness:** SQL syntax and types differ drastically between MySQL, PostgreSQL, and SQLite. The `DbDialect` enum handles these engine-specific rules (e.g., escaping reserved keywords, mapping SQL integers to Rust).
-
-use anyhow::{Context, Result};
-use sqlx::{mysql::MySqlPoolOptions, postgres::PgPoolOptions, sqlite::SqlitePoolOptions, Row};
+use serde::Deserialize;
+use sqlx::Row;
 use std::collections::HashMap;
-use std::fs::{self, File};
+use std::fs;
 use std::path::Path;
-use std::io::Write;
-use heck::{AsPascalCase, AsSnakeCase};
 
-// --- DÉTECTION DU MOTEUR (DIALECTE) ---
-
-/// Represents the supported database engines.
-/// This enum is crucial because each database engine has its own quirks
-/// regarding data types, parameter binding syntax (e.g., `?` vs `$1`), and keyword escaping.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum DbDialect {
-    MySql,
-    Postgres,
-    Sqlite,
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum Property<T> {
+    Complex {
+        value: T,
+        message: Option<String>,
+        default: Option<String>,
+    },
+    Simple(T),
 }
 
-impl DbDialect {
-    fn db_type(&self) -> &'static str {
+impl<T: Clone> Property<T> {
+    pub fn value(&self) -> T {
         match self {
-            DbDialect::MySql => "sqlx::MySql",
-            DbDialect::Postgres => "sqlx::Postgres",
-            DbDialect::Sqlite => "sqlx::Sqlite",
+            Property::Complex { value, .. } => value.clone(),
+            Property::Simple(v) => v.clone(),
         }
     }
 
-    fn ph(&self, i: usize) -> String {
+    pub fn message(&self) -> Option<String> {
         match self {
-            DbDialect::MySql => "?".to_string(),
-            DbDialect::Postgres => format!("${}", i),
-            DbDialect::Sqlite => "?".to_string(),
+            Property::Complex { message, .. } => message.clone(),
+            Property::Simple(_) => None,
         }
     }
 
-    /// Escapes column names if they conflict with reserved SQL keywords (e.g., `type`, `order`, `match`).
-    /// 
-    /// **Why this matters:** If your table has a column named `type`, generating `SELECT type FROM users`
-    /// will crash the database parser. It must be escaped as `` `type` `` in MySQL or `"type"` in Postgres/SQLite.
-    /// 
-    /// Note: For Postgres and SQLite, we escape the quotes with backslashes (`\"`) because this output
-    /// is directly injected into the generated Rust string literals (e.g., `let query = "SELECT ...";`).
-    fn escape_sql_col(&self, name: &str) -> String {
-        const SQL_KEYWORDS: &[&str] = &[
-            "type", "match", "order", "group", "select", "insert", "update", "delete",
-            "where", "from", "table", "index", "key", "primary", "foreign", "check",
-            "default", "column", "create", "alter", "drop", "values", "set", "into",
-            "join", "on", "as", "and", "or", "not", "null", "is", "in", "like",
-            "between", "exists", "having", "limit", "offset", "union", "all", "any",
-            "case", "when", "then", "else", "end", "distinct", "asc", "desc",
-            "constraint", "references", "grant", "revoke", "trigger", "view",
-            "begin", "commit", "rollback", "do", "for", "if", "return", "use",
-            "user", "role", "schema", "sequence", "function", "procedure",
-        ];
-        if SQL_KEYWORDS.contains(&name.to_lowercase().as_str()) {
-            match self {
-                DbDialect::MySql => format!("`{}`", name),
-                // Les guillemets doivent être échappés car le résultat est injecté dans un string literal Rust
-                DbDialect::Postgres | DbDialect::Sqlite => format!("\\\"{}\\\"", name),
+    pub fn default_val(&self) -> Option<String> {
+        match self {
+            Property::Complex { default, .. } => default.clone(),
+            Property::Simple(_) => None,
+        }
+    }
+}
+
+fn default_prop_false() -> Property<bool> {
+    Property::Simple(false)
+}
+
+///  `ColumnMetadata`: The In-Memory Representation of a Data Dictionary Column.
+///
+/// This struct strictly maps to the individual `<column>.toml` files generated in the
+/// `schema/` directory. It acts as the "Single Source of Truth" for the entire framework,
+/// dictating not just the Rust type, but also runtime validation rules.
+#[derive(Debug, Deserialize, Clone)]
+pub struct ColumnMetadata {
+    /// The expected Rust type string (e.g., `"i32"`, `"String"`, `"chrono::DateTime<chrono::Utc>"`).
+    #[serde(rename = "type")]
+    pub rust_type: Property<String>,
+
+    /// If `true`, the SQL column allows NULL and the Rust field will be wrapped in `Option<T>`.
+    pub is_optional: Property<bool>,
+
+    /// Minimum required length (used later by Handlers for immediate Fail-Fast payload validation).
+    pub min_length: Option<Property<usize>>,
+
+    /// Maximum allowed length (aligns with `VARCHAR(n)` size, used for validation).
+    pub max_length: Option<Property<usize>>,
+
+    pub min_value: Option<Property<i64>>,
+    pub max_value: Option<Property<i64>>,
+
+    /// Regex format rule (e.g., email or uuid pattern) used by the validation layer.
+    pub format: Option<Property<String>>,
+
+    /// Optimized array matcher, parsed and evaluated natively
+    pub enum_values: Option<Property<Vec<String>>>,
+
+    /// Indicates if the column is part of the Primary Key. Triggers generation of `get_by_pk`, `update_by_pk`.
+    #[serde(default = "default_prop_false")]
+    pub is_primary_key: Property<bool>,
+
+    /// Indicates if the database handles the increment. Automatically excludes the column from the `insert()` signature.
+    #[serde(default = "default_prop_false")]
+    pub is_auto_increment: Property<bool>,
+
+    #[serde(default)]
+    pub business_rules: std::collections::HashMap<String, String>,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct TableConfig {
+    pub database: String,
+    pub description: Option<String>,
+}
+
+///  `ColumnOverride`: The manual override configuration.
+///
+/// Contains optional fields to allow humans to override introspection defaults.
+/// Only the values defined in the TOML file will override the SQL-derived metadata.
+#[derive(Debug, Deserialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ColumnOverride {
+    #[serde(rename = "type")]
+    pub rust_type: Option<Property<String>>,
+    pub is_optional: Option<Property<bool>>,
+    pub min_length: Option<Property<usize>>,
+    pub max_length: Option<Property<usize>>,
+    pub min_value: Option<Property<i64>>,
+    pub max_value: Option<Property<i64>>,
+    pub format: Option<Property<String>>,
+    pub enum_values: Option<Property<Vec<String>>>,
+    pub business_rules: Option<std::collections::HashMap<String, String>>,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct TableConfigOverride {
+    pub database: Option<String>,
+    pub description: Option<String>,
+}
+
+///  `TableMetadata`: The In-Memory Representation of a Table.
+#[derive(Debug, Clone)]
+pub struct TableMetadata {
+    pub name: String,
+    pub config: TableConfig,
+    pub columns: HashMap<String, ColumnMetadata>,
+}
+
+///  `DaoGenerator`: The core orchestrator of the LightX code generation pipeline.
+///
+/// It performs two distinct tasks:
+/// 1. `introspect_mysql`: Reads live SQL metadata to generate TOML files (Database-First).
+/// 2. `generate_dao`: Parses the TOML files to produce zero-overhead, fully typed Rust code (`lightx_dao_generated.rs`).
+pub struct DaoGenerator {
+    schema_dir: String,
+    out_dir: String,
+}
+
+impl DaoGenerator {
+    pub fn new(schema_dir: &str, out_dir: &str) -> Self {
+        Self {
+            schema_dir: schema_dir.to_string(),
+            out_dir: out_dir.to_string(),
+        }
+    }
+
+    /// Introspects the database (automatically bypassed for Postgres/SQLite relying on offline schema)
+    pub async fn introspect(&self, database_url: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let schema_path = Path::new(&self.schema_dir);
+        fs::create_dir_all(schema_path)?;
+
+        // Ensure global databases.toml exists
+        let databases_toml_path = schema_path.join("databases.toml");
+        if !databases_toml_path.exists() {
+            let databases_toml_content = r#"# ==============================================================================
+# MULTI-DATABASE CONFIGURATION (databases.toml)
+# ==============================================================================
+# This file allows the LightX framework to configure the data access layer.
+# LightX natively supports a multi-database architecture (e.g., MySQL for users,
+# PostgreSQL for analytics).
+#
+# SECTION HEADER EXPLANATION (e.g., [default]):
+# The section header (here `default`) represents the internal database identifier.
+# - Format: Must be in `snake_case` (lowercase letters, numbers, and underscores `_`).
+# - Usage 1 (Rust Code): It will automatically generate the transaction method in the RequestContext.
+#               Example: [default] will generate `ctx.get_or_create_default_tx()`.
+# - Usage 2 (Tables): It will be used in the `database = "..."` key of your `_table.toml` files
+#               to indicate which database each table belongs to.
+#
+# USAGE RULES:
+# 1. Each block defines a distinct connection Pool.
+# 2. The environment variable will be expected in the format `{UPPERCASE_IDENTIFIER}_DATABASE_URL`.
+#    Example: for [default], define `DEFAULT_DATABASE_URL` in your `.env` file.
+#             (NB: DATABASE_URL alone is used by default during the introspection build).
+#
+# SUPPORTED PROPERTIES:
+# - dialect     : (Required) "mysql", "postgres", or "sqlite".
+# - description : (Optional) Business explanation for the development team.
+#
+# MULTI-DATABASE EXAMPLE (TO COPY/PASTE):
+#
+# [default]
+# dialect = "mysql"
+# description = "Main database containing users"
+#
+# [analytics]
+# dialect = "postgres"
+# description = "Telemetry database"
+#
+# ==============================================================================
+
+[default]
+dialect = "mysql"
+description = "Default main database autogenerated by LightX"
+"#;
+            fs::write(&databases_toml_path, databases_toml_content)?;
+        }
+
+        let is_postgres = database_url.starts_with("postgres");
+        let is_sqlite = database_url.starts_with("sqlite");
+
+        if is_postgres {
+            println!(
+                "cargo:warning= PostgreSQL live introspection is currently bypassed. Relying purely on offline definitions in TOML schemas."
+            );
+            return Ok(());
+        } else if is_sqlite {
+            println!(
+                "cargo:warning= SQLite live introspection is currently bypassed. Relying purely on offline definitions in TOML schemas."
+            );
+            return Ok(());
+        }
+
+        #[cfg(not(feature = "mysql"))]
+        {
+            println!("cargo:warning= MySQL feature is disabled. Bypassing live introspection.");
+            return Ok(());
+        }
+
+        #[cfg(feature = "mysql")]
+        let pool = sqlx::mysql::MySqlPoolOptions::new()
+            .max_connections(2)
+            .connect(database_url)
+            .await?;
+
+        // 1. Fetch all tables from current database
+        let tables_query = "SELECT CAST(TABLE_NAME AS CHAR) AS TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()";
+        let tables: Vec<String> = sqlx::query(tables_query)
+            .fetch_all(&pool)
+            .await?
+            .into_iter()
+            .map(|row| row.get::<String, _>("TABLE_NAME"))
+            .collect();
+
+        for table_name in tables {
+            let table_dir = schema_path.join(&table_name);
+            fs::create_dir_all(&table_dir)?;
+
+            let table_toml = table_dir.join("_table.toml");
+            if !table_toml.exists() {
+                fs::write(&table_toml, "database = \"default\"\n")?;
             }
+
+            // 2. Fetch all columns for the table
+            let cols_query = r#"
+                SELECT 
+                    CAST(COLUMN_NAME AS CHAR) AS COLUMN_NAME, 
+                    CAST(DATA_TYPE AS CHAR) AS DATA_TYPE, 
+                    CAST(IS_NULLABLE AS CHAR) AS IS_NULLABLE, 
+                    CAST(COLUMN_KEY AS CHAR) AS COLUMN_KEY, 
+                    CAST(EXTRA AS CHAR) AS EXTRA, 
+                    CAST(COLUMN_TYPE AS CHAR) AS COLUMN_TYPE,
+                    CHARACTER_MAXIMUM_LENGTH 
+                FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+            "#;
+
+            let columns = sqlx::query(cols_query)
+                .bind(&table_name)
+                .fetch_all(&pool)
+                .await?;
+
+            for col in columns {
+                let col_name: String = col.get("COLUMN_NAME");
+                let data_type: String = col.get("DATA_TYPE");
+                let is_nullable: String = col.get("IS_NULLABLE"); // "YES" or "NO"
+                let column_key: String = col.get("COLUMN_KEY"); // "PRI"
+                let extra: String = col.get("EXTRA"); // e.g. "auto_increment"
+                let column_type: String = col.get("COLUMN_TYPE"); // e.g. "enum('A','B')"
+                                                                  // Handle CHARACTER_MAXIMUM_LENGTH which can be NULL
+                let max_length_val: Option<i32> =
+                    col.try_get("CHARACTER_MAXIMUM_LENGTH").unwrap_or(None);
+
+                // SQL to Rust strict mapping
+                let rust_type = match data_type.as_str() {
+                    "bigint" => "i64",
+                    "int" | "integer" => "i32",
+                    "smallint" | "tinyint" => "i16",
+                    "varchar" | "text" | "enum" => "String",
+                    "timestamp" | "datetime" => "chrono::DateTime<chrono::Utc>",
+                    "date" => "chrono::NaiveDate",
+                    "json" => "serde_json::Value",
+                    "binary" | "blob" => "Vec<u8>",
+                    _ => "String",
+                };
+
+                let is_optional = is_nullable == "YES";
+                let is_primary_key = column_key == "PRI";
+                let is_auto_increment = extra.contains("auto_increment");
+
+                let min_length = if is_optional { 0 } else { 1 };
+
+                let mut min_val: Option<i64> = None;
+                let mut max_val: Option<i64> = None;
+
+                let numeric_max_len = match rust_type {
+                    "i16" => {
+                        min_val = Some(0);
+                        max_val = Some(32767);
+                        Some(5)
+                    }
+                    "i32" => {
+                        min_val = Some(0);
+                        max_val = Some(2147483647);
+                        Some(10)
+                    }
+                    "i64" => {
+                        min_val = Some(0);
+                        max_val = Some(9223372036854775807);
+                        Some(19)
+                    }
+                    _ => None,
+                };
+
+                let inferred_max_length = max_length_val.map(|v| v as usize).or(numeric_max_len);
+
+                let mut enum_values_toml = String::new();
+                let format_regex = if col_name.starts_with("is_") || col_name.starts_with("has_") {
+                    "^[01]$".to_string()
+                } else if data_type == "enum" {
+                    let mut vals_str = column_type
+                        .replace("enum(", "")
+                        .replace(")", "")
+                        .replace("'", "");
+                    let vals_arr = vals_str
+                        .split(',')
+                        .map(|s| format!("\"{}\"", s))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    enum_values_toml = format!(
+                        "[enum_values]\nvalue = [{}]\nmessage = \"schema.enum_values.message\"\n\n",
+                        vals_arr
+                    );
+                    vals_str = vals_str.replace(",", "|");
+                    format!("^({})$", vals_str)
+                } else if rust_type == "String" {
+                    if col_name.contains("email") {
+                        r#"^([a-zA-Z0-9_\-\.]+)@([a-zA-Z0-9_\-\.]+)\.([a-zA-Z]{2,5})$"#.to_string()
+                    } else if col_name.contains("password") {
+                        r#"^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$"#.to_string()
+                    } else {
+                        "^[À-ÿA-Za-z0-9_ -]*$".to_string() // Slightly restricted generic string
+                    }
+                } else if rust_type == "bool" {
+                    "^[01]$".to_string()
+                } else if col_name == "id"
+                    || col_name.ends_with("_id")
+                    || rust_type == "i16"
+                    || rust_type == "i32"
+                    || rust_type == "i64"
+                {
+                    if let Some(ml) = inferred_max_length {
+                        format!("^[0-9]{{1,{}}}$", ml)
+                    } else {
+                        "^[0-9]+$".to_string()
+                    }
+                } else if rust_type == "chrono::NaiveDateTime"
+                    || rust_type == "chrono::DateTime<chrono::Utc>"
+                {
+                    r#"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$"#.to_string()
+                } else {
+                    "^.*$".to_string()
+                };
+
+                let mut toml_content = String::new();
+
+                toml_content.push_str(&format!(
+                    "[type]\nvalue = \"{}\"\nmessage = \"schema.type.message\"\n\n",
+                    rust_type
+                ));
+                let opt_msg = if is_optional {
+                    "\"\""
+                } else {
+                    "\"schema.is_optional.message\""
+                };
+                let default_line = if is_optional {
+                    let default_val_str = match rust_type {
+                        "bool" => "false",
+                        "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64" | "f32"
+                        | "f64" => "0",
+                        _ => "",
+                    };
+                    format!("default = \"{}\"\n", default_val_str)
+                } else {
+                    "".to_string()
+                };
+
+                toml_content.push_str(&format!(
+                    "[is_optional]\nvalue = {}\nmessage = {}\n{}\n",
+                    is_optional, opt_msg, default_line
+                ));
+
+                if !enum_values_toml.is_empty() {
+                    toml_content.push_str(&enum_values_toml);
+                } else {
+                    toml_content.push_str("# [enum_values]\n# value = []\n# message = \n\n");
+                }
+
+                if let Some(len) = inferred_max_length {
+                    toml_content.push_str(&format!(
+                        "[max_length]\nvalue = {}\nmessage = \"schema.max_length.message|{}\"\n\n",
+                        len, len
+                    ));
+                }
+
+                toml_content.push_str(&format!(
+                    "[min_length]\nvalue = {}\nmessage = \"schema.min_length.message|{}\"\n\n",
+                    min_length, min_length
+                ));
+
+                if let Some(min_v) = min_val {
+                    toml_content.push_str(&format!(
+                        "[min_value]\nvalue = {}\nmessage = \"schema.min_value.message|{}\"\n\n",
+                        min_v, min_v
+                    ));
+                } else {
+                    toml_content.push_str("# [min_value]\n# value = \n# message = \n\n");
+                }
+
+                if let Some(max_v) = max_val {
+                    toml_content.push_str(&format!(
+                        "[max_value]\nvalue = {}\nmessage = \"schema.max_value.message|{}\"\n\n",
+                        max_v, max_v
+                    ));
+                } else {
+                    toml_content.push_str("# [max_value]\n# value = \n# message = \n\n");
+                }
+
+                toml_content.push_str(&format!(
+                    "[format]\nvalue = '{}'\nmessage = \"schema.format.message\"\n\n",
+                    format_regex
+                ));
+
+                toml_content.push_str(&format!("[is_primary_key]\nvalue = {}\n\n", is_primary_key));
+                toml_content.push_str(&format!(
+                    "[is_auto_increment]\nvalue = {}\n\n",
+                    is_auto_increment
+                ));
+                toml_content.push_str("[business_rules]\n\n");
+
+                let col_file = table_dir.join(format!("{}.toml", col_name));
+                // We overwrite to ensure it's synced with the actual DB
+                fs::write(col_file, toml_content)?;
+            }
+        }
+
+        println!("cargo:warning= Database introspection complete. TOML schemas generated.");
+        Ok(())
+    }
+
+    ///  Step 1 : Parsing the Data Dictionary (TOML)
+    ///
+    /// This method traverses the `/schema` directory and builds the Single Source of Truth
+    /// in memory, before generating the actual code.
+    pub fn parse_schema(&self) -> Result<Vec<TableMetadata>, Box<dyn std::error::Error>> {
+        let mut tables = Vec::new();
+        let schema_path = Path::new(&self.schema_dir);
+
+        if !schema_path.exists() || !schema_path.is_dir() {
+            println!(
+                "cargo:warning= Schema directory does not exist: {}",
+                self.schema_dir
+            );
+            return Ok(tables);
+        }
+
+        // 1. Traverse directories representing tables (e.g. /schema/users)
+        for entry in fs::read_dir(schema_path)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.is_file() && entry.file_name() == "databases.toml" {
+                // TODO: Parse databases.toml to dynamically generate RequestContext
+                continue;
+            }
+
+            if path.is_dir() {
+                let table_name = entry.file_name().into_string().unwrap();
+                let mut columns = HashMap::new();
+                let mut config = TableConfig::default();
+
+                // 2. Traverse TOML files representing columns (e.g. /schema/users/email.toml)
+                for col_entry in fs::read_dir(&path)? {
+                    let col_entry = col_entry?;
+                    let col_path = col_entry.path();
+
+                    if col_path.is_file()
+                        && col_path.extension().and_then(|s| s.to_str()) == Some("toml")
+                    {
+                        let file_stem = col_path.file_stem().unwrap().to_str().unwrap().to_string();
+                        let content = fs::read_to_string(&col_path)?;
+
+                        if file_stem == "_table" {
+                            config = toml::from_str(&content).map_err(|e| {
+                                format!("Strict parsing error in {:?}: {}", col_path, e)
+                            })?;
+                            continue;
+                        }
+
+                        // Parse, don't validate : TOML is converted to typed struct
+                        let col_meta: ColumnMetadata = toml::from_str(&content).map_err(|e| {
+                            format!("Strict parsing error in {:?}: {}", col_path, e)
+                        })?;
+
+                        columns.insert(file_stem, col_meta);
+                    }
+                }
+
+                tables.push(TableMetadata {
+                    name: table_name,
+                    config,
+                    columns,
+                });
+            }
+        }
+
+        // --- OVERRIDE STRATEGY ---
+        // Reads the `/overrides` directory and overrides in-memory values seamlessly.
+        let overrides_path = std::env::var("LIGHTX_OVERRIDES_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| schema_path.parent().unwrap().join("overrides"));
+
+        if !overrides_path.exists() {
+            fs::create_dir_all(&overrides_path)?;
+
+            let readme_en_content = r#"#  LightX Overrides Strategy
+
+Welcome to the overrides directory!
+
+The "Database-First" philosophy of LightX completely overwrites the `schema/` directory on each compilation.
+**Never modify the files in `schema/` as they will be overwritten!**
+
+If you want to override business validation rules (e.g., forcing `min_length = 5` on an SQL column), you must replicate the table's directory structure here.
+
+## Example
+To override the `last_name` column of the `users` table:
+1. Create a `users/` directory here.
+2. Create the file `users/last_name.toml` here with ONLY the values you wish to override.
+
+```toml
+[min_length]
+value = 5
+message = "The last name must be at least 5 characters long (Manual override!)"
+```
+"#;
+            fs::write(overrides_path.join("README.md"), readme_en_content)?;
+
+            let readme_fr_content = r#"#  LightX Overrides Strategy
+
+Bienvenue dans le dossier d'overrides !
+
+La philosophie "Database-First" de LightX écrase entièrement le dossier `schema/` à chaque compilation.
+**Ne modifiez jamais les fichiers dans `schema/` car ils seront écrasés !**
+
+Si vous souhaitez surcharger des règles de validation métier (ex: forcer `min_length = 5` sur une colonne SQL), vous devez reproduire l'arborescence de la table ici.
+
+## Exemple
+Pour surcharger la colonne `last_name` de la table `users` :
+1. Créez le dossier `users/` ici.
+2. Créez le fichier `users/last_name.toml` ici avec UNIQUEMENT les valeurs à écraser.
+
+```toml
+[min_length]
+value = 5
+message = "Le nom de famille doit faire au moins 5 caractères (Surcharge manuelle !)"
+```
+"#;
+            fs::write(overrides_path.join("README.fr.md"), readme_fr_content)?;
+        }
+
+        if overrides_path.is_dir() {
+            for entry in fs::read_dir(overrides_path)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.is_dir() {
+                    let table_name = entry.file_name().into_string().unwrap();
+                    if let Some(table) = tables.iter_mut().find(|t| t.name == table_name) {
+                        for col_entry in fs::read_dir(&path)? {
+                            let col_entry = col_entry?;
+                            let col_path = col_entry.path();
+                            if col_path.is_file()
+                                && col_path.extension().and_then(|s| s.to_str()) == Some("toml")
+                            {
+                                let file_stem =
+                                    col_path.file_stem().unwrap().to_str().unwrap().to_string();
+                                let content = fs::read_to_string(&col_path)?;
+
+                                if file_stem == "_table" {
+                                    if let Ok(config_override) =
+                                        toml::from_str::<TableConfigOverride>(&content)
+                                    {
+                                        if let Some(v) = config_override.database {
+                                            table.config.database = v;
+                                        }
+                                        if let Some(v) = config_override.description {
+                                            table.config.description = Some(v);
+                                        }
+                                    }
+                                    continue;
+                                }
+
+                                if let Some(col_meta) = table.columns.get_mut(&file_stem) {
+                                    let col_override: ColumnOverride = toml::from_str(&content)
+                                        .map_err(|e| {
+                                            format!(
+                                                "Override parsing error in {:?}: {}",
+                                                col_path, e
+                                            )
+                                        })?;
+                                    if let Some(v) = col_override.rust_type {
+                                        col_meta.rust_type = v;
+                                    }
+                                    if let Some(v) = col_override.is_optional {
+                                        col_meta.is_optional = v;
+                                    }
+                                    if let Some(v) = col_override.min_length {
+                                        col_meta.min_length = Some(v);
+                                    }
+                                    if let Some(v) = col_override.max_length {
+                                        col_meta.max_length = Some(v);
+                                    }
+                                    if let Some(v) = col_override.min_value {
+                                        col_meta.min_value = Some(v);
+                                    }
+                                    if let Some(v) = col_override.max_value {
+                                        col_meta.max_value = Some(v);
+                                    }
+                                    if let Some(v) = col_override.format {
+                                        col_meta.format = Some(v);
+                                    }
+                                    if let Some(v) = col_override.business_rules {
+                                        col_meta.business_rules.extend(v);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sort by table name to guarantee deterministic code generation
+        tables.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(tables)
+    }
+
+    ///  Helper to escape reserved Rust keywords (e.g., 'type' -> 'r#type')
+    fn escape_rust_keyword(name: &str) -> String {
+        const KEYWORDS: &[&str] = &[
+            "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn",
+            "for", "if", "impl", "in", "let", "loop", "match", "mut", "pub", "ref", "return",
+            "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe", "use",
+            "where", "while", "async", "await", "dyn", "abstract", "become", "box", "do", "final",
+            "macro", "override", "priv", "typeof", "unsized", "virtual", "yield", "try",
+        ];
+        if KEYWORDS.contains(&name) {
+            format!("r#{}", name)
         } else {
             name.to_string()
         }
     }
-}
 
-// --- METADATA STRUCTURES ---
-// These structures represent the in-memory schema parsed from the database.
-// They act as the Universal Intermediate Representation (IR) before Rust code is generated.
-
-#[derive(Debug, Clone)]
-pub struct Column {
-    pub name: String,
-    pub data_type: String,
-    pub is_nullable: bool,
-    pub is_primary: bool,
-    pub is_auto_increment: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct Index {
-    pub name: String,
-    pub columns: Vec<String>,
-    pub is_unique: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct Table {
-    pub name: String,
-    pub is_view: bool,
-    pub columns: Vec<Column>,
-    pub indexes: Vec<Index>,
-}
-
-// --- GENERATOR ---
-
-/// The main orchestrator for generating the DAO layer.
-/// 
-/// **Usage:** You instantiate this in your `build.rs` script, providing the database URL.
-/// When you run `cargo build`, it automatically connects to the database, introspects the schema,
-/// and writes the generated `.rs` files into your project source directory.
-pub struct DaoxGenerator {
-    database_url: String,
-    output_dir: String,
-    dialect: DbDialect,
-}
-
-impl DaoxGenerator {
-    pub fn new(database_url: &str, output_dir: &str) -> Self {
-        let dialect = if database_url.starts_with("postgres") {
-            DbDialect::Postgres
-        } else if database_url.starts_with("sqlite") {
-            DbDialect::Sqlite
-        } else {
-            DbDialect::MySql
-        };
-
-        Self {
-            database_url: database_url.to_string(),
-            output_dir: output_dir.to_string(),
-            dialect,
+    ///  Helper to convert snake_case to PascalCase (e.g., 'users' -> 'Users')
+    fn to_pascal_case(s: &str) -> String {
+        let mut result = String::new();
+        let mut capitalize_next = true;
+        for c in s.chars() {
+            if c == '_' || c == '-' {
+                capitalize_next = true;
+            } else if capitalize_next {
+                result.push(c.to_ascii_uppercase());
+                capitalize_next = false;
+            } else {
+                result.push(c);
+            }
         }
+        result
     }
 
-    pub async fn generate(&self) -> Result<()> {
-        println!("cargo:warning=🚀 Démarrage de la génération daox...");
-        
-        let tables = match self.dialect {
-            DbDialect::MySql => {
-                println!("cargo:warning=🐬 Détection Moteur MySQL/MariaDB");
-                let pool = MySqlPoolOptions::new()
-                    .max_connections(2)
-                    .connect(&self.database_url)
-                    .await
-                    .context("Impossible de se connecter à MySQL. Docker tourne-t-il ?")?;
+    ///  Executes the complete DAO Generation pipeline (Steps 2, 3, and 4)
+    pub fn generate_dao(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let tables = self.parse_schema()?;
 
-                let db_name = self.database_url.rsplit('/').next()
-                    .unwrap_or("")
-                    .split('?')
-                    .next()
-                    .unwrap_or("");
+        // Step 2 : Generation Target (OUT_DIR)
+        let dest_path = Path::new(&self.out_dir).join("lightx_dao_generated.rs");
+        let mut code = String::from(
+            "// =====================================================================\n// THIS FILE IS AUTO-GENERATED BY LIGHTX. DO NOT EDIT.\n// =====================================================================\n\n",
+        );
 
-                self.introspect_mysql(&pool, db_name).await?
+        // --- GENERATING RequestContext ---
+        let databases_toml_path = Path::new(&self.schema_dir).join("databases.toml");
+        let databases_content = fs::read_to_string(&databases_toml_path)?;
+        let databases: toml::Value = toml::from_str(&databases_content)?;
+        let db_keys: Vec<String> = databases.as_table().unwrap().keys().cloned().collect();
+
+        let get_dialect = |db_name: &str| -> String {
+            databases
+                .get(db_name)
+                .and_then(|t| t.as_table())
+                .and_then(|t| t.get("dialect"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("mysql")
+                .to_string()
+        };
+        let get_pool_type = |dialect: &str| -> &str {
+            if dialect == "postgres" {
+                "sqlx::PgPool"
+            } else if dialect == "sqlite" {
+                "sqlx::SqlitePool"
+            } else {
+                "sqlx::MySqlPool"
             }
-            DbDialect::Postgres => {
-                println!("cargo:warning=🐘 Détection Moteur PostgreSQL");
-                let pool = PgPoolOptions::new()
-                    .max_connections(2)
-                    .connect(&self.database_url)
-                    .await
-                    .context("Impossible de se connecter à PostgreSQL. Docker tourne-t-il ?")?;
-                
-                self.introspect_postgres(&pool).await?
+        };
+        let get_tx_type = |dialect: &str| -> &str {
+            if dialect == "postgres" {
+                "sqlx::Postgres"
+            } else if dialect == "sqlite" {
+                "sqlx::Sqlite"
+            } else {
+                "sqlx::MySql"
             }
-            DbDialect::Sqlite => {
-                println!("cargo:warning=🪶 Détection Moteur SQLite");
-                let pool = SqlitePoolOptions::new()
-                    .max_connections(2)
-                    .connect(&self.database_url)
-                    .await
-                    .context("Impossible de se connecter à SQLite.")?;
-                
-                self.introspect_sqlite(&pool).await?
+        };
+        let get_pool_options = |dialect: &str| -> &str {
+            if dialect == "postgres" {
+                "sqlx::postgres::PgPoolOptions"
+            } else if dialect == "sqlite" {
+                "sqlx::sqlite::SqlitePoolOptions"
+            } else {
+                "sqlx::mysql::MySqlPoolOptions"
+            }
+        };
+        let get_fallback_url = |dialect: &str| -> &str {
+            if dialect == "postgres" {
+                "postgres://postgres:postgres@127.0.0.1:5432/my_database"
+            } else if dialect == "sqlite" {
+                "sqlite::memory:"
+            } else {
+                "mysql://root:root@127.0.0.1:3306/my_database"
             }
         };
 
-        // S'assurer que le dossier de sortie existe
-        fs::create_dir_all(&self.output_dir)?;
+        code.push_str("pub struct RequestContext {\n");
+        code.push_str("    pub raw_body: lightx::ext::bytes::Bytes,\n");
+        code.push_str("    pub rate_limiter: std::sync::Arc<lightx::ext::moka::sync::Cache<(std::net::IpAddr, &'static str), std::sync::Arc<std::sync::atomic::AtomicU32>>>,\n");
+        code.push_str("    pub response_cache: std::sync::Arc<lightx::ext::moka::sync::Cache<String, (lightx::ext::hyper::StatusCode, lightx::ext::hyper::HeaderMap, lightx::ext::bytes::Bytes, std::time::Instant)>>,\n");
+        code.push_str("    pub client_ip: std::net::IpAddr,\n");
+        code.push_str("    pub user_id: std::option::Option<String>,\n");
+        code.push_str("    pub headers: lightx::ext::hyper::HeaderMap,\n");
+        for db in &db_keys {
+            let dialect = get_dialect(db);
+            code.push_str(&format!(
+                "    pub {}_pool: {},\n",
+                db,
+                get_pool_type(&dialect)
+            ));
+            code.push_str(&format!(
+                "    pub {}_tx: Option<sqlx::Transaction<'static, {}>>,\n",
+                db,
+                get_tx_type(&dialect)
+            ));
+        }
+        code.push_str("}\n\n");
 
-        let mut mod_imports = Vec::new();
+        code.push_str("pub struct AppContextFactory {\n");
+        code.push_str("    pub rate_limiter: std::sync::Arc<lightx::ext::moka::sync::Cache<(std::net::IpAddr, &'static str), std::sync::Arc<std::sync::atomic::AtomicU32>>>,\n");
+        code.push_str("    pub response_cache: std::sync::Arc<lightx::ext::moka::sync::Cache<String, (lightx::ext::hyper::StatusCode, lightx::ext::hyper::HeaderMap, lightx::ext::bytes::Bytes, std::time::Instant)>>,\n");
+        for db in &db_keys {
+            let dialect = get_dialect(db);
+            code.push_str(&format!(
+                "    pub {}_pool: {},\n",
+                db,
+                get_pool_type(&dialect)
+            ));
+        }
+        code.push_str("}\n\n");
 
-        for table in &tables {
-            let struct_name = format!("{}", AsPascalCase(&table.name));
-            let file_name = format!("{}.rs", AsSnakeCase(&table.name));
-            let file_path = Path::new(&self.output_dir).join(&file_name);
+        code.push_str("impl AppContextFactory {\n");
+        code.push_str("    pub async fn new() -> Result<Self, lightx::core::AppError> {\n");
+        code.push_str("        Ok(Self {\n");
+        code.push_str("            rate_limiter: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().build()),\n");
+        code.push_str("            response_cache: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().build()),\n");
+        for db in &db_keys {
+            let dialect = get_dialect(db);
+            code.push_str(&format!("            {}_pool: {}::new().connect(&std::env::var(\"{}_DATABASE_URL\").or_else(|_| std::env::var(\"DATABASE_URL\")).unwrap_or_else(|_| \"{}\".to_string())).await.map_err(|e| lightx::core::AppError::SystemError {{ msg: e.to_string(), file: file!(), line: line!() }})?,\n", db, get_pool_options(&dialect), db.to_uppercase(), get_fallback_url(&dialect)));
+        }
+        code.push_str("        })\n");
+        code.push_str("    }\n");
+        code.push_str("}\n\n");
 
-            // On garde en mémoire pour générer le `mod.rs` à la fin
-            mod_imports.push(AsSnakeCase(&table.name).to_string());
+        code.push_str("impl lightx::server::ContextFactory for AppContextFactory {\n");
+        code.push_str("    type Context = RequestContext;\n");
+        code.push_str("    fn create_context(&self, peer_addr: std::net::IpAddr, headers: lightx::ext::hyper::HeaderMap, raw_body: lightx::ext::bytes::Bytes) -> Self::Context {\n");
+        code.push_str("        let mut client_ip = peer_addr;\n");
+        code.push_str("        if let Some(xff) = headers.get(\"x-forwarded-for\") {\n");
+        code.push_str("            if let Ok(s) = xff.to_str() {\n");
+        code.push_str("                if let Some(first) = s.split(',').next() {\n");
+        code.push_str("                    if let Ok(parsed) = first.trim().parse() { client_ip = parsed; }\n");
+        code.push_str("                }\n");
+        code.push_str("            }\n");
+        code.push_str("        } else if let Some(xreal) = headers.get(\"x-real-ip\") {\n");
+        code.push_str("            if let Ok(s) = xreal.to_str() {\n");
+        code.push_str(
+            "                if let Ok(parsed) = s.trim().parse() { client_ip = parsed; }\n",
+        );
+        code.push_str("            }\n");
+        code.push_str("        }\n");
+        code.push_str("        RequestContext {\n");
+        code.push_str("            raw_body,\n");
+        code.push_str("            rate_limiter: self.rate_limiter.clone(),\n");
+        code.push_str("            response_cache: self.response_cache.clone(),\n");
+        code.push_str("            client_ip,\n");
+        code.push_str("            user_id: None,\n");
+        code.push_str("            headers,\n");
+        for db in &db_keys {
+            code.push_str(&format!(
+                "            {}_pool: self.{}_pool.clone(),\n",
+                db, db
+            ));
+            code.push_str(&format!("            {}_tx: None,\n", db));
+        }
+        code.push_str("        }\n");
+        code.push_str("    }\n");
 
-            println!("cargo:warning=✍️ Génération du modèle : {} -> {}", table.name, file_name);
+        code.push_str("    fn commit_context<'a>(&'a self, ctx: &'a mut Self::Context) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {\n");
+        code.push_str("        Box::pin(async move {\n");
+        for db in &db_keys {
+            code.push_str(&format!(
+                "            if let Some(tx) = ctx.{}_tx.take() {{\n",
+                db
+            ));
+            code.push_str("                tx.commit().await.map_err(|e| e.to_string())?;\n");
+            code.push_str("            }\n");
+        }
+        code.push_str("            Ok(())\n");
+        code.push_str("        })\n");
+        code.push_str("    }\n");
+        code.push_str("}\n\n");
 
-            // Construction du code Rust pour la structure (Model)
-            let mut code = String::new();
-            code.push_str("// Code generated automatically by daox. DO NOT EDIT.\n\n");
+        code.push_str("impl RequestContext {\n");
+        code.push_str(
+            "    pub async fn new_sandbox_context() -> Result<Self, lightx::core::AppError> {\n",
+        );
+        code.push_str("        let mut ctx = Self {\n");
+        code.push_str("            raw_body: lightx::ext::bytes::Bytes::new(),\n");
+        code.push_str("            rate_limiter: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().max_capacity(1).build()),\n");
+        code.push_str("            response_cache: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().max_capacity(1).build()),\n");
+        code.push_str("            client_ip: \"127.0.0.1\".parse().unwrap(),\n");
+        code.push_str("            user_id: None,\n");
+        code.push_str("            headers: lightx::ext::hyper::HeaderMap::new(),\n");
+        for db in &db_keys {
+            let dialect = get_dialect(db);
+            code.push_str(&format!("            {}_pool: {}::new().connect(&std::env::var(\"{}_DATABASE_URL\").or_else(|_| std::env::var(\"DATABASE_URL\")).unwrap_or_else(|_| \"{}\".to_string())).await.map_err(|e| lightx::core::AppError::SystemError {{ msg: e.to_string(), file: file!(), line: line!() }})?,\n", db, get_pool_options(&dialect), db.to_uppercase(), get_fallback_url(&dialect)));
+            code.push_str(&format!("            {}_tx: None,\n", db));
+        }
+        code.push_str("        };\n");
+        for db in &db_keys {
+            code.push_str(&format!("        ctx.get_or_create_{}_tx().await?;\n", db));
+        }
+        code.push_str("        Ok(ctx)\n");
+        code.push_str("    }\n\n");
+
+        code.push_str("    pub async fn rollback_all_sandbox_tx(&mut self) -> Result<(), lightx::core::AppError> {\n");
+        for db in &db_keys {
+            code.push_str(&format!("        self.rollback_{}_tx().await?;\n", db));
+        }
+        code.push_str("        Ok(())\n");
+        code.push_str("    }\n\n");
+
+        for db in &db_keys {
+            let dialect = get_dialect(db);
+            code.push_str(&format!("    pub async fn get_or_create_{}_tx(&mut self) -> Result<&mut sqlx::Transaction<'static, {}>, lightx::core::AppError> {{\n", db, get_tx_type(&dialect)));
+            code.push_str(&format!("        if self.{}_tx.is_none() {{\n", db));
+            code.push_str(&format!("            let tx = self.{}_pool.begin().await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError {{ msg: e.to_string(), file: file!(), line: line!() }})?;\n", db));
+            code.push_str(&format!("            self.{}_tx = Some(tx);\n", db));
+            code.push_str("        }\n");
+            code.push_str(&format!("        self.{}_tx.as_mut().ok_or_else(|| lightx::core::AppError::SystemError {{ msg: \"Tx absent\".to_string(), file: file!(), line: line!() }})\n", db));
+            code.push_str("    }\n\n");
+
+            code.push_str(&format!("    pub async fn commit_{}_tx(&mut self) -> Result<(), lightx::core::AppError> {{\n", db));
+            code.push_str(&format!(
+                "        if let Some(tx) = self.{}_tx.take() {{\n",
+                db
+            ));
+            code.push_str("            tx.commit().await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;\n");
+            code.push_str("        }\n        Ok(())\n    }\n\n");
+
+            code.push_str(&format!("    pub async fn rollback_{}_tx(&mut self) -> Result<(), lightx::core::AppError> {{\n", db));
+            code.push_str(&format!(
+                "        if let Some(tx) = self.{}_tx.take() {{\n",
+                db
+            ));
+            code.push_str("            tx.rollback().await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;\n");
+            code.push_str("        }\n        Ok(())\n    }\n");
+        }
+        code.push_str("}\n\n");
+
+        for table in tables {
+            let struct_name = Self::to_pascal_case(&table.name);
+
+            // Step 3 : Generating Rust Structures (Models)
             code.push_str("#[derive(Debug, Clone, sqlx::FromRow)]\n");
             code.push_str(&format!("pub struct {} {{\n", struct_name));
 
-            for col in &table.columns {
-                let rust_type = map_sql_type(&col.data_type, col.is_nullable, self.dialect);
-                let snake_col_name = format!("{}", AsSnakeCase(&col.name));
-                let rust_field = escape_rust_keyword(&snake_col_name);
+            // Sort by column name for absolute determinism of generated code
+            let mut cols: Vec<_> = table.columns.iter().collect();
+            cols.sort_by(|a, b| a.0.cmp(b.0));
+
+            for (col_name, col_meta) in &cols {
+                let rust_field = Self::escape_rust_keyword(col_name);
+                let mut rust_type = col_meta.rust_type.value();
+
+                // Handling optionality (NULL in DB)
+                if col_meta.is_optional.value() {
+                    rust_type = format!("Option<{}>", rust_type);
+                }
+
                 code.push_str(&format!("    pub {}: {},\n", rust_field, rust_type));
             }
             code.push_str("}\n\n");
 
-            // S'applique aux TABLES et aux VUES de manière égale !
-            code.push_str(&generate_read_methods(table, self.dialect));
+            // Step 4 : Generating CRUD Operations
+            code.push_str(&format!("impl {} {{\n", struct_name));
 
-            if !table.is_view {
-                code.push_str(&generate_write_methods(table, self.dialect));
-                code.push_str(&generate_patch_struct(table, self.dialect));
-                code.push_str(&generate_partial_update_method(table, self.dialect));
+            // Separate columns according to their business role
+            let mut pk_cols = Vec::new();
+            let mut insert_cols = Vec::new();
+            let mut update_cols = Vec::new();
+
+            for (col_name, col_meta) in &cols {
+                if col_meta.is_primary_key.value() {
+                    pk_cols.push((col_name.to_string(), (*col_meta).clone()));
+                }
+                if !col_meta.is_auto_increment.value() {
+                    insert_cols.push((col_name.to_string(), (*col_meta).clone()));
+                }
+                if !col_meta.is_primary_key.value() {
+                    update_cols.push((col_name.to_string(), (*col_meta).clone()));
+                }
             }
 
-            // Écriture physique du fichier
-            let mut file = File::create(file_path)?;
-            file.write_all(code.as_bytes())?;
+            let db_name = if table.config.database.is_empty() {
+                "default".to_string()
+            } else {
+                table.config.database.clone()
+            };
+            let table_dialect = get_dialect(&db_name);
+            let is_postgres = table_dialect == "postgres";
+            let is_sqlite = table_dialect == "sqlite";
+
+            let tx_method = format!("get_or_create_{}_tx", db_name);
+
+            // --- 1. INSERT ---
+            if !insert_cols.is_empty() {
+                let col_names = insert_cols
+                    .iter()
+                    .map(|(n, _)| {
+                        if is_postgres {
+                            format!("\"{}\"", n)
+                        } else {
+                            format!("`{}`", n)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let placeholders = insert_cols
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| {
+                        if is_postgres {
+                            format!("${}", i + 1)
+                        } else {
+                            "?".to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                code.push_str("    /// Inserts the current record. The BEGIN TRANSACTION is guaranteed by the RequestContext.\n");
+                code.push_str("    pub async fn insert(&self, ctx: &mut crate::RequestContext) -> Result<u64, lightx::core::AppError> {\n");
+                code.push_str(&format!("        let tx = ctx.{}().await?;\n", tx_method));
+                let table_name_q = if is_postgres {
+                    format!("\"{}\"", table.name)
+                } else {
+                    table.name.clone()
+                };
+                code.push_str(&format!(
+                    "        let result = sqlx::query(r#\"INSERT INTO {} ({}) VALUES ({})\"#)\n",
+                    table_name_q, col_names, placeholders
+                ));
+
+                for (col_name, _) in &insert_cols {
+                    let field = Self::escape_rust_keyword(col_name);
+                    code.push_str(&format!("        .bind(&self.{})\n", field));
+                }
+                code.push_str("        .execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;\n");
+                if is_postgres {
+                    code.push_str("        Ok(0) // Postgres RETURNING mapping natively bypassed in base generator\n");
+                } else if is_sqlite {
+                    code.push_str("        Ok(result.last_insert_rowid() as u64)\n");
+                } else {
+                    code.push_str("        Ok(result.last_insert_id())\n");
+                }
+                code.push_str("    }\n\n");
+            }
+
+            // --- 2. GET_BY_PK ---
+            if !pk_cols.is_empty() {
+                let pk_args = pk_cols
+                    .iter()
+                    .map(|(n, m)| {
+                        format!("{}: {}", Self::escape_rust_keyword(n), m.rust_type.value())
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let pk_where = pk_cols
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (n, _))| {
+                        if is_postgres {
+                            format!("\"{}\" = ${}", n, i + 1)
+                        } else {
+                            format!("`{}` = ?", n)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" AND ");
+
+                code.push_str("    /// Retrieves a record via its primary key. SQL syntax validation at compile time.\n");
+                code.push_str(&format!("    pub async fn get_by_pk(ctx: &mut crate::RequestContext, {}) -> Result<Option<Self>, lightx::core::AppError> {{\n", pk_args));
+                code.push_str(&format!("        let tx = ctx.{}().await?;\n", tx_method));
+                let table_name_q = if is_postgres {
+                    format!("\"{}\"", table.name)
+                } else {
+                    table.name.clone()
+                };
+                code.push_str(&format!(
+                    "        let record = sqlx::query_as(r#\"SELECT * FROM {} WHERE {}\"#)\n",
+                    table_name_q, pk_where
+                ));
+
+                for (col_name, _) in &pk_cols {
+                    let field = Self::escape_rust_keyword(col_name);
+                    code.push_str(&format!("        .bind(&{})\n", field));
+                }
+                code.push_str("        .fetch_optional(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;\n");
+                code.push_str("        Ok(record)\n");
+                code.push_str("    }\n\n");
+            }
+
+            // --- 3. UPDATE_BY_PK ---
+            if !pk_cols.is_empty() && !update_cols.is_empty() {
+                let set_clauses = update_cols
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (n, _))| {
+                        if is_postgres {
+                            format!("\"{}\" = ${}", n, i + 1)
+                        } else {
+                            format!("`{}` = ?", n)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let pk_where = pk_cols
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (n, _))| {
+                        if is_postgres {
+                            format!("\"{}\" = ${}", n, i + 1 + update_cols.len())
+                        } else {
+                            format!("`{}` = ?", n)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" AND ");
+
+                code.push_str("    /// Updates the entire record via its primary key.\n");
+                code.push_str("    pub async fn update_by_pk(&self, ctx: &mut crate::RequestContext) -> Result<(), lightx::core::AppError> {\n");
+                code.push_str(&format!("        let tx = ctx.{}().await?;\n", tx_method));
+                let table_name_q = if is_postgres {
+                    format!("\"{}\"", table.name)
+                } else {
+                    table.name.clone()
+                };
+                code.push_str(&format!(
+                    "        sqlx::query(r#\"UPDATE {} SET {} WHERE {}\"#)\n",
+                    table_name_q, set_clauses, pk_where
+                ));
+
+                let mut all_binds = Vec::new();
+                for (n, _) in &update_cols {
+                    all_binds.push(n.to_string());
+                }
+                for (n, _) in &pk_cols {
+                    all_binds.push(n.to_string());
+                }
+
+                for col_name in &all_binds {
+                    let field = Self::escape_rust_keyword(col_name);
+                    code.push_str(&format!("        .bind(&self.{})\n", field));
+                }
+                code.push_str("        .execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;\n");
+                code.push_str("        Ok(())\n");
+                code.push_str("    }\n\n");
+            }
+
+            // --- 4. DELETE_BY_PK ---
+            if !pk_cols.is_empty() {
+                let pk_args = pk_cols
+                    .iter()
+                    .map(|(n, m)| {
+                        format!("{}: {}", Self::escape_rust_keyword(n), m.rust_type.value())
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let pk_where = pk_cols
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (n, _))| {
+                        if is_postgres {
+                            format!("\"{}\" = ${}", n, i + 1)
+                        } else {
+                            format!("`{}` = ?", n)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" AND ");
+
+                code.push_str("    /// Permanently deletes the record.\n");
+                code.push_str(&format!("    pub async fn delete_by_pk(ctx: &mut crate::RequestContext, {}) -> Result<(), lightx::core::AppError> {{\n", pk_args));
+                code.push_str(&format!("        let tx = ctx.{}().await?;\n", tx_method));
+                let table_name_q = if is_postgres {
+                    format!("\"{}\"", table.name)
+                } else {
+                    table.name.clone()
+                };
+                code.push_str(&format!(
+                    "        sqlx::query(r#\"DELETE FROM {} WHERE {}\"#)\n",
+                    table_name_q, pk_where
+                ));
+
+                for (col_name, _) in &pk_cols {
+                    let field = Self::escape_rust_keyword(col_name);
+                    code.push_str(&format!("        .bind(&{})\n", field));
+                }
+                code.push_str("        .execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;\n");
+                code.push_str("        Ok(())\n");
+                code.push_str("    }\n\n");
+            }
+
+            code.push_str("}\n\n");
         }
 
-        // Générer le fichier central `mod.rs` pour lier tous les fichiers générés
-        let mut mod_code = String::new();
-        mod_code.push_str("// Code généré automatiquement par daox. NE PAS MODIFIER.\n\n");
-        for import in mod_imports {
-            mod_code.push_str(&format!("pub mod {};\n", import));
-        }
-        
-        let mod_path = Path::new(&self.output_dir).join("mod.rs");
-        let mut mod_file = File::create(mod_path)?;
-        mod_file.write_all(mod_code.as_bytes())?;
+        // Final deterministic write into the OUT_DIR artifact directory
+        fs::write(dest_path, code)?;
+        println!("cargo:warning= DAO generation completed successfully in OUT_DIR!");
 
-        println!("cargo:warning=✅ Génération terminée avec succès !");
         Ok(())
     }
-
-    // --- LOGIQUE D'INTROSPECTION MYSQL / MARIADB ---
-    async fn introspect_mysql(&self, pool: &sqlx::MySqlPool, db_name: &str) -> Result<Vec<Table>> {
-        let mut tables = Vec::new();
-        let rows = sqlx::query("SELECT TABLE_NAME, TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?")
-            .bind(db_name).fetch_all(pool).await?;
-
-        for row in rows {
-            let table_name: String = row.get("TABLE_NAME");
-            let is_view = row.get::<String, _>("TABLE_TYPE") == "VIEW";
-
-            let col_rows = sqlx::query("SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_KEY, EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION")
-                .bind(db_name).bind(&table_name).fetch_all(pool).await?;
-
-            let mut columns = Vec::new();
-            for col in col_rows {
-                let extra: String = col.get("EXTRA");
-                columns.push(Column {
-                    name: col.get("COLUMN_NAME"),
-                    data_type: col.get("DATA_TYPE"),
-                    is_nullable: col.get::<String, _>("IS_NULLABLE") == "YES",
-                    is_primary: col.get::<String, _>("COLUMN_KEY") == "PRI",
-                    is_auto_increment: extra.to_lowercase().contains("auto_increment"),
-                });
-            }
-
-            let mut indexes: Vec<Index> = Vec::new();
-            if !is_view {
-                let idx_rows = sqlx::query("SELECT INDEX_NAME, COLUMN_NAME, NON_UNIQUE FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY INDEX_NAME, SEQ_IN_INDEX")
-                    .bind(db_name).bind(&table_name).fetch_all(pool).await?;
-
-                let mut index_map: HashMap<String, Index> = HashMap::new();
-                for idx in idx_rows {
-                    let index_name: String = idx.get("INDEX_NAME");
-                    if index_name == "PRIMARY" { continue; }
-                    let column_name: String = idx.get("COLUMN_NAME");
-                    let non_unique: i64 = idx.try_get::<i64, _>("NON_UNIQUE").or_else(|_| idx.try_get::<i32, _>("NON_UNIQUE").map(|v| v as i64)).unwrap_or(1);
-                    index_map.entry(index_name.clone()).and_modify(|e| e.columns.push(column_name.clone())).or_insert(Index { name: index_name, columns: vec![column_name], is_unique: non_unique == 0 });
-                }
-                indexes = index_map.into_values().collect();
-            }
-            tables.push(Table { name: table_name, is_view, columns, indexes });
-        }
-        Ok(tables)
-    }
-
-    // --- LOGIQUE D'INTROSPECTION POSTGRESQL ---
-    async fn introspect_postgres(&self, pool: &sqlx::PgPool) -> Result<Vec<Table>> {
-        let mut tables = Vec::new();
-        let rows = sqlx::query("SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'public'").fetch_all(pool).await?;
-
-        for row in rows {
-            let table_name: String = row.get("table_name");
-            let is_view = row.get::<String, _>("table_type") == "VIEW";
-
-            let col_rows = sqlx::query(
-                "SELECT column_name, udt_name as data_type, is_nullable, column_default,
-                 (SELECT COUNT(*) > 0 FROM information_schema.key_column_usage kcu JOIN information_schema.table_constraints tc ON kcu.constraint_name = tc.constraint_name WHERE tc.table_schema = 'public' AND tc.table_name = $1 AND kcu.column_name = c.column_name AND tc.constraint_type = 'PRIMARY KEY') as is_primary,
-                 is_identity
-                 FROM information_schema.columns c WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position"
-            ).bind(&table_name).fetch_all(pool).await?;
-
-            let mut columns = Vec::new();
-            for col in col_rows {
-                let default_val: Option<String> = col.try_get("column_default").unwrap_or_default();
-                let is_identity: Option<String> = col.try_get("is_identity").unwrap_or_default();
-                let is_auto_inc = default_val.unwrap_or_default().contains("nextval") || is_identity.unwrap_or_default() == "YES";
-                columns.push(Column {
-                    name: col.get("column_name"), 
-                    data_type: col.get("data_type"), 
-                    is_nullable: col.get::<String, _>("is_nullable") == "YES",
-                    is_primary: col.get::<bool, _>("is_primary"), 
-                    is_auto_increment: is_auto_inc,
-                });
-            }
-
-            let mut indexes: Vec<Index> = Vec::new();
-            if !is_view {
-                let idx_rows = sqlx::query(
-                    "SELECT ix.relname as index_name, a.attname as column_name, i.indisunique as is_unique
-                     FROM pg_catalog.pg_class t JOIN pg_catalog.pg_index i ON t.oid = i.indrelid JOIN pg_catalog.pg_class ix ON i.indexrelid = ix.oid CROSS JOIN unnest(i.indkey) WITH ORDINALITY AS k(attnum, pos) JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum JOIN pg_catalog.pg_namespace n ON t.relnamespace = n.oid
-                     WHERE n.nspname = 'public' AND t.relkind = 'r' AND t.relname = $1 AND i.indisprimary = false ORDER BY ix.relname, k.pos"
-                ).bind(&table_name).fetch_all(pool).await?;
-
-                let mut index_map: HashMap<String, Index> = HashMap::new();
-                for idx in idx_rows {
-                    let index_name: String = idx.get("index_name");
-                    let column_name: String = idx.get("column_name");
-                    let is_unique: bool = idx.get("is_unique");
-                    index_map.entry(index_name.clone()).and_modify(|e| e.columns.push(column_name.clone())).or_insert(Index { name: index_name, columns: vec![column_name], is_unique });
-                }
-                indexes = index_map.into_values().collect();
-            }
-            tables.push(Table { name: table_name, is_view, columns, indexes });
-        }
-        Ok(tables)
-    }
-
-    async fn introspect_sqlite(&self, pool: &sqlx::sqlite::SqlitePool) -> Result<Vec<Table>> {
-        let mut tables = Vec::new();
-        
-        let db_tables = sqlx::query("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'")
-            .fetch_all(pool).await?;
-
-        for row in db_tables {
-            let table_name: String = row.get("name");
-            let table_type: String = row.get("type");
-            let is_view = table_type == "view";
-            
-            let cols = sqlx::query(&format!("PRAGMA table_info('{}')", table_name))
-                .fetch_all(pool).await?;
-            
-            let mut columns = Vec::new();
-            for col_row in cols {
-                let name: String = col_row.get("name");
-                let data_type: String = col_row.get("type");
-                let notnull: i32 = col_row.try_get("notnull").unwrap_or(0);
-                let pk: i32 = col_row.try_get("pk").unwrap_or(0);
-                
-                let is_nullable = notnull == 0 && pk == 0;
-                let is_primary = pk > 0;
-                let is_auto_increment = is_primary && data_type.to_uppercase().contains("INT");
-                
-                columns.push(Column {
-                    name,
-                    data_type: data_type.to_lowercase(),
-                    is_nullable,
-                    is_primary,
-                    is_auto_increment,
-                });
-            }
-
-            let mut indexes = Vec::new();
-            let idxs = sqlx::query(&format!("PRAGMA index_list('{}')", table_name))
-                .fetch_all(pool).await?;
-            
-            for idx_row in idxs {
-                let name: String = idx_row.get("name");
-                let unique: i32 = idx_row.get("unique");
-                let origin: String = idx_row.try_get("origin").unwrap_or_else(|_| "".to_string());
-                
-                if origin == "pk" { continue; }
-                let is_unique = unique != 0;
-                
-                let idx_cols = sqlx::query(&format!("PRAGMA index_info('{}')", name))
-                    .fetch_all(pool).await?;
-                
-                let mut idx_columns = Vec::new();
-                for c_row in idx_cols {
-                    if let Ok(col_name) = c_row.try_get::<String, _>("name") {
-                        if !col_name.is_empty() {
-                            idx_columns.push(col_name);
-                        }
-                    }
-                }
-                
-                indexes.push(Index { name, columns: idx_columns, is_unique });
-            }
-
-            tables.push(Table { name: table_name, is_view, columns, indexes });
-        }
-        Ok(tables)
-    }
 }
 
-// --- TRANSLATING SQL TYPES TO RUST TYPES ---
-
-/// Maps database-specific SQL types to strongly-typed Rust native types.
-/// 
-/// **Dialect Specifics:**
-/// - `SQLite`: `INTEGER` is always mapped to `i64` because SQLite uses 64-bit signed integers for its ROWID.
-/// - `Postgres/MySQL`: `INT` is safely mapped to `i32`, while `BIGINT` is mapped to `i64`.
-/// - `Dates/JSON`: Safely fall back to `chrono` types and `String` respectively.
-fn map_sql_type(sql_type: &str, is_nullable: bool, dialect: DbDialect) -> String {
-    let rust_type = match sql_type.to_lowercase().as_str() {
-        // Entiers — SQLite INTEGER est toujours 64-bit (rowid)
-        "bigint" | "int8" | "bigserial" => "i64",
-        "integer" if dialect == DbDialect::Sqlite => "i64",
-        "int" | "integer" | "int4" | "mediumint" | "serial" => "i32",
-        "smallint" | "int2" => "i16",
-        "tinyint" => "i8",
-        // Flottants
-        "double" | "real" | "double precision" | "float8" => "f64",
-        "float" | "float4" => "f32",
-        // Numériques exacts (safe fallback String sans dépendance rust_decimal)
-        "numeric" | "decimal" => "String",
-        // Texte
-        "varchar" | "char" | "bpchar" | "text" | "longtext" | "mediumtext" | "tinytext" | "character varying" | "name" => "String",
-        // Dates / Temps
-        "date" => "chrono::NaiveDate",
-        "time" | "time without time zone" | "timetz" => "chrono::NaiveTime",
-        "datetime" | "timestamp" | "timestamp without time zone" => "chrono::NaiveDateTime",
-        "timestamptz" | "timestamp with time zone" => "chrono::DateTime<chrono::Utc>",
-        // Binaire
-        "blob" | "binary" | "varbinary" | "longblob" | "bytea" => "Vec<u8>",
-        // Booléen
-        "boolean" | "bool" => "bool",
-        // JSON / UUID (safe fallback String)
-        "json" | "jsonb" | "uuid" => "String",
-        _ => "String",
-    };
-
-    if is_nullable {
-        format!("Option<{}>", rust_type)
-    } else {
-        rust_type.to_string()
-    }
+/// The main entrypoint mapping the Database-First facade.
+pub struct DaoxGenerator {
+    db_url: String,
+    out_dir: String,
 }
 
-/// Escapes Rust reserved keywords using the `r#` syntax.
-/// 
-/// **Why this matters:** If a database column is named `type` or `match`, you cannot create a Rust
-/// struct with a field named `type` because it won't compile. This function detects reserved keywords
-/// and converts them to `r#type`, allowing the Rust compiler to accept them as valid identifiers.
-fn escape_rust_keyword(name: &str) -> String {
-    const KEYWORDS: &[&str] = &[
-        "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn",
-        "for", "if", "impl", "in", "let", "loop", "match", "mut", "pub", "ref", "return",
-        "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe", "use",
-        "where", "while", "async", "await", "dyn", "abstract", "become", "box", "do", "final",
-        "macro", "override", "priv", "typeof", "unsized", "virtual", "yield", "try",
-    ];
-    if KEYWORDS.contains(&name) {
-        format!("r#{}", name)
-    } else {
-        name.to_string()
-    }
-}
-
-// --- GÉNÉRATEUR DES MÉTHODES D'ÉCRITURE ---
-
-fn generate_write_methods(table: &Table, dialect: DbDialect) -> String {
-    let mut code = String::new();
-    let struct_name = format!("{}", AsPascalCase(&table.name));
-    
-    code.push_str(&format!("impl {} {{\n", struct_name));
-
-    let pk_col = table.columns.iter().find(|c| c.is_primary);
-    
-    // On exclut la colonne auto-incrémentée de l'insertion
-    let insert_cols: Vec<&Column> = table.columns.iter().filter(|c| !c.is_auto_increment).collect();
-    let col_names = insert_cols.iter().map(|c| dialect.escape_sql_col(&c.name)).collect::<Vec<_>>().join(", ");
-    
-    let mut placeholders = String::new();
-    for i in 0..insert_cols.len() {
-        if i > 0 { placeholders.push_str(", "); }
-        placeholders.push_str(&dialect.ph(i + 1));
-    }
-
-    // 1. --- INSERT ---
-    code.push_str("    /// Inserts the current record into the database.\n");
-    code.push_str("    /// \n");
-    code.push_str("    /// **Best Practice:** Use this method when you want to create a brand new row.\n");
-    code.push_str("    /// If the table has an auto-increment primary key, the database will generate the ID automatically.\n");
-    code.push_str("    /// \n");
-    code.push_str("    /// Returns the generated ID (or 0 if the table doesn't have an auto-increment ID).\n");
-    code.push_str(&format!("    pub async fn insert<'e, E: sqlx::Executor<'e, Database = {}>>(&self, executor: E) -> sqlx::Result<u64> {{\n", dialect.db_type()));
-    
-    let is_numeric_pk = pk_col.map_or(false, |pk| {
-        let t = pk.data_type.to_lowercase();
-        t == "int2" || t == "int4" || t == "int8" || t == "integer" || t == "bigint" || t == "smallint" || t == "serial" || t == "bigserial"
-    });
-
-    if dialect == DbDialect::Postgres && is_numeric_pk {
-        let pk = pk_col.unwrap();
-        // Le cast ::bigint est essentiel pour sqlx Postgres si le PK est un INT (i32) car on fetch dans (i64,)
-        code.push_str(&format!("        let query = \"INSERT INTO {} ({}) VALUES ({}) RETURNING {}::bigint\";\n", table.name, col_names, placeholders, dialect.escape_sql_col(&pk.name)));
-        code.push_str("        let (id,): (i64,) = sqlx::query_as(&query)\n");
-        for col in &insert_cols {
-            let field = escape_rust_keyword(&format!("{}", AsSnakeCase(&col.name)));
-            code.push_str(&format!("            .bind(&self.{})\n", field));
-        }
-        code.push_str("            .fetch_one(executor).await?;\n        Ok(id as u64)\n    }\n\n");
-    } else {
-        code.push_str(&format!("        let query = \"INSERT INTO {} ({}) VALUES ({})\";\n", table.name, col_names, placeholders));
-        code.push_str("        let result = sqlx::query(&query)\n");
-        for col in &insert_cols {
-            let field = escape_rust_keyword(&format!("{}", AsSnakeCase(&col.name)));
-            code.push_str(&format!("            .bind(&self.{})\n", field));
-        }
-        code.push_str("            .execute(executor).await?;\n");
-        if dialect == DbDialect::MySql {
-            code.push_str("        Ok(result.last_insert_id())\n    }\n\n");
-        } else if dialect == DbDialect::Sqlite {
-            code.push_str("        Ok(result.last_insert_rowid() as u64)\n    }\n\n");
-        } else {
-            code.push_str("        Ok(result.rows_affected())\n    }\n\n");
+impl DaoxGenerator {
+    pub fn new(db_url: &str, out_dir: &str) -> Self {
+        Self {
+            db_url: db_url.to_string(),
+            out_dir: out_dir.to_string(),
         }
     }
 
-    // 2. --- INSERT BATCH ---
-    code.push_str("    /// Inserts multiple records in a single network round-trip (Batch Insert).\n");
-    code.push_str("    /// \n");
-    code.push_str("    /// **Performance:** This is heavily optimized. Instead of running 100 individual `INSERT` queries,\n");
-    code.push_str("    /// this method groups them into one massive `INSERT INTO ... VALUES (...), (...), ...` query.\n");
-    code.push_str("    /// Always prefer this method over looping with `.insert()` when saving large amounts of data.\n");
-    code.push_str("    /// \n");
-    code.push_str("    /// Returns the number of rows successfully inserted.\n");
-    code.push_str(&format!("    pub async fn insert_batch<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, items: &[Self]) -> sqlx::Result<u64> {{\n", dialect.db_type()));
-    code.push_str("        if items.is_empty() { return Ok(0); }\n");
-    code.push_str(&format!("        let mut query_builder: sqlx::QueryBuilder<{}> = sqlx::QueryBuilder::new(\"INSERT INTO {} ({}) \");\n", dialect.db_type(), table.name, col_names));
-    code.push_str("        query_builder.push_values(items, |mut b, item| {\n");
-    for col in &insert_cols {
-        let field = escape_rust_keyword(&format!("{}", AsSnakeCase(&col.name)));
-        code.push_str(&format!("            b.push_bind(&item.{});\n", field));
+    pub async fn generate(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let schema_dir = format!("{}/.daox_schema", self.out_dir);
+        let inner = DaoGenerator::new(&schema_dir, &self.out_dir);
+        inner.introspect(&self.db_url).await?;
+        inner.generate_dao()?;
+        Ok(())
     }
-    code.push_str("        });\n        let result = query_builder.build().execute(executor).await?;\n        Ok(result.rows_affected())\n    }\n\n");
-
-    // 3. --- UPSERT ---
-    code.push_str("    /// Inserts the record, or updates it if a unique constraint is violated (Upsert).\n");
-    code.push_str("    /// \n");
-    code.push_str("    /// **How it works:** \n");
-    code.push_str("    /// 1. The database attempts to insert the row.\n");
-    code.push_str("    /// 2. If a collision occurs (e.g., an email already exists in a UNIQUE index),\n");
-    code.push_str("    ///    it automatically updates the existing row with the new data instead of crashing.\n");
-    code.push_str("    /// \n");
-    code.push_str("    /// This is highly recommended for data synchronization tasks.\n");
-    code.push_str(&format!("    pub async fn upsert<'e, E: sqlx::Executor<'e, Database = {}>>(&self, executor: E) -> sqlx::Result<u64> {{\n", dialect.db_type()));
-    
-    let mut conflict_cols = Vec::new();
-    let pk_cols_ref: Vec<_> = table.columns.iter().filter(|c| c.is_primary).collect();
-    let has_auto_inc_pk = pk_cols_ref.iter().any(|c| c.is_auto_increment);
-    let pk_col_names: Vec<_> = pk_cols_ref.iter().map(|c| c.name.clone()).collect();
-    
-    // Si la PK est auto-incrémentée, elle est exclue de l'INSERT. Le conflit sur PK ne peut donc jamais arriver.
-    // Dans ce cas précis, on doit obligatoirement utiliser un index unique comme cible de conflit.
-    if !pk_col_names.is_empty() && !has_auto_inc_pk {
-        conflict_cols = pk_col_names;
-    } else if let Some(idx) = table.indexes.iter().find(|idx| idx.is_unique) {
-        conflict_cols = idx.columns.clone();
-    }
-
-    if dialect == DbDialect::Postgres || dialect == DbDialect::Sqlite {
-        if !conflict_cols.is_empty() {
-            let conflict_target = conflict_cols.iter().map(|c| dialect.escape_sql_col(c)).collect::<Vec<_>>().join(", ");
-            let update_clauses = insert_cols.iter().map(|c| { let esc = dialect.escape_sql_col(&c.name); format!("{0} = EXCLUDED.{0}", esc) }).collect::<Vec<_>>().join(", ");
-            code.push_str(&format!("        let query = \"INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO UPDATE SET {}\";\n", table.name, col_names, placeholders, conflict_target, update_clauses));
-        } else {
-            code.push_str(&format!("        let query = \"INSERT INTO {} ({}) VALUES ({})\";\n", table.name, col_names, placeholders));
-        }
-    } else {
-        let update_clauses = insert_cols.iter().map(|c| { let esc = dialect.escape_sql_col(&c.name); format!("{0} = VALUES({0})", esc) }).collect::<Vec<_>>().join(", ");
-        code.push_str(&format!("        let query = \"INSERT INTO {} ({}) VALUES ({}) ON DUPLICATE KEY UPDATE {}\";\n", table.name, col_names, placeholders, update_clauses));
-    }
-    code.push_str("        let result = sqlx::query(&query)\n");
-    for col in &insert_cols {
-        let field = escape_rust_keyword(&format!("{}", AsSnakeCase(&col.name)));
-        code.push_str(&format!("            .bind(&self.{})\n", field));
-    }
-    code.push_str("            .execute(executor).await?;\n        Ok(result.rows_affected())\n    }\n\n");
-
-    // OPÉRATIONS LIÉES À LA CLÉ PRIMAIRE
-    let pk_cols: Vec<&Column> = table.columns.iter().filter(|c| c.is_primary).collect();
-    if !pk_cols.is_empty() {
-        let pk_args = pk_cols.iter().map(|c| format!("{}: &{}", escape_rust_keyword(&format!("{}", AsSnakeCase(&c.name))), map_sql_type(&c.data_type, c.is_nullable, dialect))).collect::<Vec<_>>().join(", ");
-        let update_cols: Vec<&Column> = table.columns.iter().filter(|c| !c.is_primary).collect();
-        
-        let mut set_clauses = String::new();
-        for (i, c) in update_cols.iter().enumerate() {
-            if i > 0 { set_clauses.push_str(", "); }
-            set_clauses.push_str(&format!("{} = {}", dialect.escape_sql_col(&c.name), dialect.ph(i + 1)));
-        }
-        
-        let pk_where = pk_cols.iter().enumerate().map(|(i, c)| format!("{} = {}", dialect.escape_sql_col(&c.name), dialect.ph(update_cols.len() + i + 1))).collect::<Vec<_>>().join(" AND ");
-
-        // 4. --- UPDATE BY PK ---
-        code.push_str("    /// Overwrites the entire record in the database using its Primary Key.\n");
-        code.push_str("    /// \n");
-        code.push_str("    /// **Warning:** This will update ALL columns in the row with the values in the current struct.\n");
-        code.push_str("    /// If you only want to update one or two specific columns, use `update_partial_by_pk` instead \n");
-        code.push_str("    /// to save network bandwidth and database disk I/O.\n");
-        code.push_str(&format!("    pub async fn update_by_pk<'e, E: sqlx::Executor<'e, Database = {}>>(&self, executor: E) -> sqlx::Result<u64> {{\n", dialect.db_type()));
-        code.push_str(&format!("        let query = \"UPDATE {} SET {} WHERE {}\";\n", table.name, set_clauses, pk_where));
-        code.push_str("        let result = sqlx::query(&query)\n");
-        for col in &update_cols {
-            let field = escape_rust_keyword(&format!("{}", AsSnakeCase(&col.name)));
-            code.push_str(&format!("            .bind(&self.{})\n", field));
-        }
-        for col in &pk_cols {
-            let field = escape_rust_keyword(&format!("{}", AsSnakeCase(&col.name)));
-            code.push_str(&format!("            .bind(&self.{})\n", field));
-        }
-        code.push_str("            .execute(executor).await?;\n        Ok(result.rows_affected())\n    }\n\n");
-
-        // 5. --- DELETE BY PK ---
-        let pk_where_del = pk_cols.iter().enumerate().map(|(i, c)| format!("{} = {}", dialect.escape_sql_col(&c.name), dialect.ph(i + 1))).collect::<Vec<_>>().join(" AND ");
-        code.push_str("    /// Deletes the specific record from the database using its Primary Key.\n");
-        code.push_str("    /// \n");
-        code.push_str("    /// Returns the number of affected rows (1 if deleted, 0 if it didn't exist).\n");
-        code.push_str(&format!("    pub async fn delete_by_pk<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, {}) -> sqlx::Result<u64> {{\n", dialect.db_type(), pk_args));
-        code.push_str(&format!("        let query = \"DELETE FROM {} WHERE {}\";\n", table.name, pk_where_del));
-        code.push_str("        let result = sqlx::query(&query)\n");
-        for col in &pk_cols {
-            let field = escape_rust_keyword(&format!("{}", AsSnakeCase(&col.name)));
-            code.push_str(&format!("            .bind({})\n", field));
-        }
-        code.push_str("            .execute(executor).await?;\n        Ok(result.rows_affected())\n    }\n\n");
-
-        // 6. --- DELETE MANY BY PK ---
-        if pk_cols.len() == 1 {
-            let pk = pk_cols[0];
-            let pk_rust_type = map_sql_type(&pk.data_type, pk.is_nullable, dialect);
-            
-            code.push_str("    /// Deletes multiple records in a single query using an `IN (...)` clause.\n");
-            code.push_str("    /// \n");
-            code.push_str("    /// **Performance:** This is the most efficient way to delete a batch of specific IDs.\n");
-            code.push_str("    /// Returns the total number of rows successfully deleted.\n");
-            code.push_str(&format!("    pub async fn delete_many_by_pk<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, ids: &[{k_rust_type}]) -> sqlx::Result<u64> {{\n", dialect.db_type(), k_rust_type = pk_rust_type));
-            code.push_str("        if ids.is_empty() { return Ok(0); }\n");
-            code.push_str(&format!("        let mut query_builder: sqlx::QueryBuilder<{}> = sqlx::QueryBuilder::new(\"DELETE FROM {} WHERE {} IN \");\n", dialect.db_type(), table.name, dialect.escape_sql_col(&pk.name)));
-            code.push_str("        query_builder.push(\"(\");\n        let mut separated = query_builder.separated(\", \");\n");
-            code.push_str("        for id in ids { separated.push_bind(id); }\n");
-            code.push_str("        separated.push_unseparated(\")\");\n        let result = query_builder.build().execute(executor).await?;\n        Ok(result.rows_affected())\n    }\n\n");
-        }
-    }
-
-    for idx in &table.indexes {
-        let func_suffix = idx.columns.iter().map(|c| format!("{}", AsSnakeCase(c))).collect::<Vec<_>>().join("_and_");
-        
-        let set_cols: Vec<&Column> = table.columns.iter().filter(|c| !c.is_primary && !idx.columns.contains(&c.name)).collect();
-        if !set_cols.is_empty() {
-            let mut set_clauses = String::new();
-            for (i, c) in set_cols.iter().enumerate() {
-                if i > 0 { set_clauses.push_str(", "); }
-                set_clauses.push_str(&format!("{} = {}", dialect.escape_sql_col(&c.name), dialect.ph(i + 1)));
-            }
-
-            let mut offset = set_cols.len() + 1;
-            let mut idx_where = String::new();
-            for (i, c) in idx.columns.iter().enumerate() {
-                if i > 0 { idx_where.push_str(" AND "); }
-                idx_where.push_str(&format!("{} = {}", dialect.escape_sql_col(c), dialect.ph(offset)));
-                offset += 1;
-            }
-
-            code.push_str(&format!("    /// Updates records matching the `{}` index.\n", idx.name));
-            code.push_str("    /// \n");
-            code.push_str("    /// **Warning:** This overwrites all columns (except the index columns) with the values from the current struct.\n");
-            code.push_str(&format!("    pub async fn update_by_{}<'e, E: sqlx::Executor<'e, Database = {}>>(&self, executor: E) -> sqlx::Result<u64> {{\n", func_suffix, dialect.db_type()));
-            code.push_str(&format!("        let query = \"UPDATE {} SET {} WHERE {}\";\n        let result = sqlx::query(&query)\n", table.name, set_clauses, idx_where));
-            for col in &set_cols {
-                let field = escape_rust_keyword(&format!("{}", AsSnakeCase(&col.name)));
-                code.push_str(&format!("            .bind(&self.{})\n", field));
-            }
-            for c in &idx.columns {
-                let field = escape_rust_keyword(&format!("{}", AsSnakeCase(c)));
-                code.push_str(&format!("            .bind(&self.{})\n", field));
-            }
-            code.push_str("            .execute(executor).await?;\n        Ok(result.rows_affected())\n    }\n\n");
-        }
-
-        let mut idx_params = Vec::new();
-        let mut where_clauses = String::new();
-        for (i, c) in idx.columns.iter().enumerate() {
-            if let Some(col) = table.columns.iter().find(|col| &col.name == c) {
-                let field = escape_rust_keyword(&format!("{}", AsSnakeCase(c)));
-                idx_params.push(format!("{}: &{}", field, map_sql_type(&col.data_type, col.is_nullable, dialect)));
-                if i > 0 { where_clauses.push_str(" AND "); }
-                where_clauses.push_str(&format!("{} = {}", dialect.escape_sql_col(c), dialect.ph(i + 1)));
-            }
-        }
-
-        code.push_str(&format!("    /// Deletes records matching the `{}` index.\n", idx.name));
-        code.push_str("    /// \n");
-        code.push_str("    /// Returns the number of affected rows.\n");
-        code.push_str(&format!("    pub async fn delete_by_{}<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, {}) -> sqlx::Result<u64> {{\n", func_suffix, dialect.db_type(), idx_params.join(", ")));
-        code.push_str(&format!("        let query = \"DELETE FROM {} WHERE {}\";\n        let result = sqlx::query(&query)\n", table.name, where_clauses));
-        for c in &idx.columns {
-            let field = escape_rust_keyword(&format!("{}", AsSnakeCase(c)));
-            code.push_str(&format!("            .bind({})\n", field));
-        }
-        code.push_str("            .execute(executor).await?;\n        Ok(result.rows_affected())\n    }\n\n");
-    }
-
-    code.push_str("}\n\n");
-    code
-}
-
-// --- GÉNÉRATEUR DES MÉTHODES DE LECTURE (TABLES & VUES) ---
-
-fn generate_read_methods(table: &Table, dialect: DbDialect) -> String {
-    let mut code = String::new();
-    let struct_name = format!("{}", AsPascalCase(&table.name));
-    
-    code.push_str(&format!("impl {} {{\n", struct_name));
-
-    // 1. --- MÉTHODES GLOBALES ---
-    code.push_str("    /// Counts the total number of rows in the table.\n");
-    code.push_str("    /// \n");
-    code.push_str("    /// **Note:** On large tables, `COUNT(*)` can be slow. Use it thoughtfully.\n");
-    code.push_str(&format!("    pub async fn count<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E) -> sqlx::Result<u64> {{\n", dialect.db_type()));
-    code.push_str(&format!("        let query = \"SELECT COUNT(*) FROM {}\";\n", table.name));
-    code.push_str("        let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;\n");
-    code.push_str("        Ok(count as u64)\n");
-    code.push_str("    }\n\n");
-
-    code.push_str("    /// Creates a zero-allocation Asynchronous Stream over the entire table.\n");
-    code.push_str("    /// \n");
-    code.push_str("    /// **Performance:** This is the absolute best way to process millions of rows.\n");
-    code.push_str("    /// Instead of loading all rows into RAM (which would cause out-of-memory crashes),\n");
-    code.push_str("    /// the Stream fetches and yields rows one by one directly from the database connection.\n");
-    code.push_str(&format!("    pub fn stream_all<'e, E: sqlx::Executor<'e, Database = {}> + 'e>(executor: E) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {{\n", dialect.db_type()));
-    code.push_str(&format!("        let query = \"SELECT * FROM {}\";\n", table.name));
-    code.push_str("        sqlx::query_as::<_, Self>(query).fetch(executor)\n");
-    code.push_str("    }\n\n");
-
-    code.push_str("    /// Classic Offset/Limit pagination with dynamic sorting.\n");
-    code.push_str("    /// \n");
-    code.push_str("    /// **SECURITY WARNING:** The `order_by` parameter is NOT bound via prepared statements \n");
-    code.push_str("    /// (SQL does not allow binding column names). You MUST strictly whitelist the user input \n");
-    code.push_str("    /// before passing it here to prevent SQL Injection!\n");
-    code.push_str("    /// \n");
-    code.push_str("    /// **Performance:** Offset pagination becomes very slow on deep pages. Consider `list_by_cursor` instead.\n");
-    code.push_str(&format!("    pub async fn list_paginated<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, order_by: &str, page: u32, page_size: u32) -> sqlx::Result<Vec<Self>> {{\n", dialect.db_type()));
-    code.push_str("        let offset = page.saturating_sub(1) * page_size;\n");
-    code.push_str(&format!("        let query = format!(\"SELECT * FROM {} ORDER BY {{}} LIMIT {} OFFSET {}\", order_by);\n", table.name, dialect.ph(1), dialect.ph(2)));
-    if dialect == DbDialect::Postgres {
-        code.push_str("        sqlx::query_as::<_, Self>(&query).bind(page_size as i64).bind(offset as i64).fetch_all(executor).await\n");
-    } else {
-        code.push_str("        sqlx::query_as::<_, Self>(&query).bind(page_size).bind(offset).fetch_all(executor).await\n");
-    }
-    code.push_str("    }\n\n");
-
-    let pk_cols: Vec<&Column> = table.columns.iter().filter(|c| c.is_primary).collect();
-
-    // 2. --- OPÉRATIONS LIÉES À LA CLÉ PRIMAIRE ---
-    if !pk_cols.is_empty() {
-        let pk_args = pk_cols.iter().map(|c| format!("{}: &{}", escape_rust_keyword(&format!("{}", AsSnakeCase(&c.name))), map_sql_type(&c.data_type, c.is_nullable, dialect))).collect::<Vec<_>>().join(", ");
-        let pk_where = pk_cols.iter().enumerate().map(|(i, c)| format!("{} = {}", dialect.escape_sql_col(&c.name), dialect.ph(i + 1))).collect::<Vec<_>>().join(" AND ");
-
-        code.push_str("    /// Retrieves a single record using its Primary Key.\n");
-        code.push_str("    /// \n");
-        code.push_str("    /// Returns `Some(Self)` if the record exists, or `None` if it does not.\n");
-        code.push_str(&format!("    pub async fn get_by_pk<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, {}) -> sqlx::Result<Option<Self>> {{\n", dialect.db_type(), pk_args));
-        code.push_str(&format!("        let query = \"SELECT * FROM {} WHERE {}\";\n", table.name, pk_where));
-        code.push_str("        sqlx::query_as::<_, Self>(query)\n");
-        for col in &pk_cols {
-            let field = escape_rust_keyword(&format!("{}", AsSnakeCase(&col.name)));
-            code.push_str(&format!("            .bind({})\n", field));
-        }
-        code.push_str("            .fetch_optional(executor).await\n    }\n\n");
-
-        code.push_str("    /// Checks if a record exists using its Primary Key.\n");
-        code.push_str("    /// \n");
-        code.push_str("    /// **Performance:** This uses a `SELECT 1 ... LIMIT 1` query. It is infinitely faster \n");
-        code.push_str("    /// and lighter than `get_by_pk` when you only need to check for existence, because it avoids \n");
-        code.push_str("    /// transferring and deserializing the full row data.\n");
-        code.push_str(&format!("    pub async fn exists_by_pk<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, {}) -> sqlx::Result<bool> {{\n", dialect.db_type(), pk_args));
-        code.push_str(&format!("        let query = \"SELECT 1 FROM {} WHERE {} LIMIT 1\";\n", table.name, pk_where));
-        code.push_str("        let exists: Option<(i32,)> = sqlx::query_as(query)\n");
-        for col in &pk_cols {
-            let field = escape_rust_keyword(&format!("{}", AsSnakeCase(&col.name)));
-            code.push_str(&format!("            .bind({})\n", field));
-        }
-        code.push_str("            .fetch_optional(executor).await?;\n        Ok(exists.is_some())\n    }\n\n");
-
-        if pk_cols.len() == 1 {
-            let pk = pk_cols[0];
-            let pk_rust_type = map_sql_type(&pk.data_type, pk.is_nullable, dialect);
-            code.push_str("    /// Cursor-based Pagination (Keyset Pagination).\n");
-            code.push_str("    /// \n");
-            code.push_str("    /// **Performance:** This is the SOTA (State of the Art) standard for pagination.\n");
-            code.push_str("    /// Unlike `OFFSET` which scans and discards thousands of rows, this jumps immediately to the \n");
-            code.push_str("    /// correct row using the B-Tree index, offering O(1) constant-time absolute performance.\n");
-            code.push_str(&format!("    pub async fn list_by_cursor<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, last_id: &{}, limit: u32) -> sqlx::Result<Vec<Self>> {{\n", dialect.db_type(), pk_rust_type));
-            code.push_str(&format!("        let query = \"SELECT * FROM {} WHERE {} > {} ORDER BY {} ASC LIMIT {}\";\n", table.name, dialect.escape_sql_col(&pk.name), dialect.ph(1), dialect.escape_sql_col(&pk.name), dialect.ph(2)));
-            if dialect == DbDialect::Postgres {
-                 code.push_str("        sqlx::query_as::<_, Self>(query).bind(last_id).bind(limit as i64).fetch_all(executor).await\n");
-            } else {
-                 code.push_str("        sqlx::query_as::<_, Self>(query).bind(last_id).bind(limit).fetch_all(executor).await\n");
-            }
-            code.push_str("    }\n\n");
-        }
-    }
-
-    // 3. --- OPÉRATIONS LIÉES AUX INDEX ---
-    for idx in &table.indexes {
-        let func_suffix = idx.columns.iter().map(|c| format!("{}", AsSnakeCase(c))).collect::<Vec<_>>().join("_and_");
-        
-        let mut idx_params = Vec::new();
-        let mut where_clauses = String::new();
-        let mut bind_calls = String::new();
-        let mut stream_binds = String::new();
-        
-        for (i, c) in idx.columns.iter().enumerate() {
-            if let Some(col) = table.columns.iter().find(|col| &col.name == c) {
-                let snake = format!("{}", AsSnakeCase(c));
-                let field = escape_rust_keyword(&snake);
-                idx_params.push(format!("{}: &{}", field, map_sql_type(&col.data_type, col.is_nullable, dialect)));
-                
-                if i > 0 { where_clauses.push_str(" AND "); }
-                where_clauses.push_str(&format!("{} = {}", dialect.escape_sql_col(c), dialect.ph(i + 1)));
-
-                bind_calls.push_str(&format!(".bind({})", field));
-                stream_binds.push_str(&format!(".bind({}.clone())", field));
-            }
-        }
-        let params_str = idx_params.join(", ");
-
-        code.push_str(&format!("    /// Checks if a record exists using the `{}` index.\n", idx.name));
-        code.push_str("    /// \n");
-        code.push_str("    /// **Performance:** Extremely fast, uses `SELECT 1 ... LIMIT 1`.\n");
-        code.push_str(&format!("    pub async fn exists_by_{}<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, {}) -> sqlx::Result<bool> {{\n", func_suffix, dialect.db_type(), params_str));
-        code.push_str(&format!("        let query = \"SELECT 1 FROM {} WHERE {} LIMIT 1\";\n", table.name, where_clauses));
-        code.push_str(&format!("        let exists: Option<(i32,)> = sqlx::query_as(query){}.fetch_optional(executor).await?;\n", bind_calls));
-        code.push_str("        Ok(exists.is_some())\n");
-        code.push_str("    }\n\n");
-
-        if idx.is_unique {
-            code.push_str(&format!("    /// Retrieves a single record using the unique `{}` index.\n", idx.name));
-            code.push_str(&format!("    pub async fn get_by_{}<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, {}) -> sqlx::Result<Option<Self>> {{\n", func_suffix, dialect.db_type(), params_str));
-            code.push_str(&format!("        let query = \"SELECT * FROM {} WHERE {}\";\n", table.name, where_clauses));
-            code.push_str(&format!("        sqlx::query_as::<_, Self>(query){}.fetch_optional(executor).await\n", bind_calls));
-            code.push_str("    }\n\n");
-        } else {
-            code.push_str(&format!("    /// Retrieves all records matching the `{}` index.\n", idx.name));
-            code.push_str(&format!("    pub async fn list_by_{}<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, {}) -> sqlx::Result<Vec<Self>> {{\n", func_suffix, dialect.db_type(), params_str));
-            code.push_str(&format!("        let query = \"SELECT * FROM {} WHERE {}\";\n", table.name, where_clauses));
-            code.push_str(&format!("        sqlx::query_as::<_, Self>(query){}.fetch_all(executor).await\n", bind_calls));
-            code.push_str("    }\n\n");
-
-            code.push_str(&format!("    /// Creates a zero-allocation Asynchronous Stream using the `{}` index.\n", idx.name));
-            code.push_str(&format!("    pub fn stream_by_{}<'e, E: sqlx::Executor<'e, Database = {}> + 'e>(executor: E, {}) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {{\n", func_suffix, dialect.db_type(), params_str));
-            code.push_str(&format!("        let query = \"SELECT * FROM {} WHERE {}\";\n", table.name, where_clauses));
-            code.push_str(&format!("        sqlx::query_as::<_, Self>(query){}.fetch(executor)\n", stream_binds));
-            code.push_str("    }\n\n");
-        }
-    }
-
-    code.push_str("}\n\n");
-    code
-}
-
-// --- GÉNÉRATEUR DE LA STRUCTURE PATCH (UPDATE PARTIEL) ---
-
-fn generate_patch_struct(table: &Table, dialect: DbDialect) -> String {
-    let mut code = String::new();
-    let struct_name = format!("{}", AsPascalCase(&table.name));
-    let patch_struct_name = format!("{}Patch", struct_name);
-
-    code.push_str(&format!("/// Structure used for partial updates (Patching) of `{}`.\n", table.name));
-    code.push_str("/// \n");
-    code.push_str("/// Each field is wrapped in an `Option`. If a field is `None`, it will be completely ignored during the update.\n");
-    code.push_str("/// If it is `Some(value)`, that column will be updated in the database.\n");
-    code.push_str("#[derive(Debug, Clone, Default)]\n");
-    code.push_str(&format!("pub struct {} {{\n", patch_struct_name));
-
-    for col in &table.columns {
-        if col.is_primary { continue; } 
-        
-        let rust_type = map_sql_type(&col.data_type, col.is_nullable, dialect);
-        let field_name = escape_rust_keyword(&format!("{}", AsSnakeCase(&col.name)));
-        
-        code.push_str(&format!("    pub {}: Option<{}>,\n", field_name, rust_type));
-    }
-    code.push_str("}\n\n");
-    
-    code
-}
-
-// --- GÉNÉRATEUR DE LA FONCTION UPDATE_PARTIAL_BY_PK ---
-
-fn generate_partial_update_method(table: &Table, dialect: DbDialect) -> String {
-    
-    let pk_cols: Vec<&Column> = table.columns.iter().filter(|c| c.is_primary).collect();
-    if pk_cols.is_empty() {
-        return String::new(); // Pas de clé primaire, pas de mise à jour ciblée possible
-    }
-    
-    let struct_name = format!("{}", AsPascalCase(&table.name));
-    let patch_struct_name = format!("{}Patch", struct_name);
-    let pk_args = pk_cols.iter().map(|c| format!("{}: &{}", escape_rust_keyword(&format!("{}", AsSnakeCase(&c.name))), map_sql_type(&c.data_type, c.is_nullable, dialect))).collect::<Vec<_>>().join(", ");
-
-    let mut code = String::new();
-    code.push_str(&format!("impl {} {{\n", struct_name));
-    code.push_str("    /// Updates ONLY the columns that contain data in the `patch` struct.\n");
-    code.push_str("    /// \n");
-    code.push_str("    /// **Performance:** This is the most optimized way to update data.\n");
-    code.push_str("    /// It dynamically builds the SQL query to only include the changed columns, which saves network bandwidth\n");
-    code.push_str("    /// and significantly reduces database disk I/O (WAL logging) compared to a full row update.\n");
-    
-    code.push_str(&format!("    pub async fn update_partial_by_pk<'e, E: sqlx::Executor<'e, Database = {}>>(executor: E, {}, patch: &{}) -> sqlx::Result<u64> {{\n", dialect.db_type(), pk_args, patch_struct_name));
-    code.push_str(&format!("        let mut query_builder: sqlx::QueryBuilder<{}> = sqlx::QueryBuilder::new(\"UPDATE {} SET \");\n", dialect.db_type(), table.name));
-    code.push_str("        let mut has_fields = false;\n");
-    
-    code.push_str("        let mut separated = query_builder.separated(\", \");\n\n");
-
-    for col in &table.columns {
-        if col.is_primary { continue; }
-        
-        let field_name = escape_rust_keyword(&format!("{}", AsSnakeCase(&col.name)));
-        
-        code.push_str(&format!("        if let Some(val) = &patch.{} {{\n", field_name));
-        code.push_str("            has_fields = true;\n");
-        code.push_str(&format!("            separated.push(\"{} = \");\n", dialect.escape_sql_col(&col.name)));
-        code.push_str("            separated.push_bind_unseparated(val.clone());\n");
-        code.push_str("        }\n");
-    }
-
-    code.push_str("\n        if !has_fields {\n");
-    code.push_str("            // Si le patch est vide, on économise un aller-retour réseau\n");
-    code.push_str("            return Ok(0);\n");
-    code.push_str("        }\n\n");
-
-    let mut is_first = true;
-    for col in &pk_cols {
-        if is_first {
-            code.push_str(&format!("        query_builder.push(\" WHERE {} = \");\n", dialect.escape_sql_col(&col.name)));
-            is_first = false;
-        } else {
-            code.push_str(&format!("        query_builder.push(\" AND {} = \");\n", dialect.escape_sql_col(&col.name)));
-        }
-        let field = escape_rust_keyword(&format!("{}", AsSnakeCase(&col.name)));
-        code.push_str(&format!("        query_builder.push_bind({}.clone());\n", field));
-    }
-
-    code.push_str("\n        let result = query_builder.build().execute(executor).await?;\n");
-    code.push_str("        Ok(result.rows_affected())\n");
-    code.push_str("    }\n");
-    code.push_str("}\n\n");
-
-    code
 }
