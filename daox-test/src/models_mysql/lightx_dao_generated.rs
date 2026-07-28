@@ -202,10 +202,10 @@ impl Currencies {
     }
 
     /// Retrieves a record via its primary key. SQL syntax validation at compile time.
-    pub async fn get_by_pk(ctx: &mut crate::RequestContext, code: String) -> Result<Option<Self>, lightx::core::AppError> {
+    pub async fn get_by_pk(ctx: &mut crate::RequestContext, code: &str) -> Result<Option<Self>, lightx::core::AppError> {
         let tx = ctx.get_or_create_default_tx().await?;
         let record = sqlx::query_as(r#"SELECT * FROM currencies WHERE `code` = ?"#)
-        .bind(&code)
+        .bind(code)
         .fetch_optional(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(record)
     }
@@ -221,10 +221,10 @@ impl Currencies {
     }
 
     /// Permanently deletes the record.
-    pub async fn delete_by_pk(ctx: &mut crate::RequestContext, code: String) -> Result<(), lightx::core::AppError> {
+    pub async fn delete_by_pk(ctx: &mut crate::RequestContext, code: &str) -> Result<(), lightx::core::AppError> {
         let tx = ctx.get_or_create_default_tx().await?;
         sqlx::query(r#"DELETE FROM currencies WHERE `code` = ?"#)
-        .bind(&code)
+        .bind(code)
         .execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(())
     }
@@ -305,10 +305,10 @@ impl ProductMetadata {
     }
 
     /// Retrieves a record via its primary key. SQL syntax validation at compile time.
-    pub async fn get_by_pk(ctx: &mut crate::RequestContext, id: Vec<u8>) -> Result<Option<Self>, lightx::core::AppError> {
+    pub async fn get_by_pk(ctx: &mut crate::RequestContext, id: &[u8]) -> Result<Option<Self>, lightx::core::AppError> {
         let tx = ctx.get_or_create_default_tx().await?;
         let record = sqlx::query_as(r#"SELECT * FROM product_metadata WHERE `id` = ?"#)
-        .bind(&id)
+        .bind(id)
         .fetch_optional(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(record)
     }
@@ -326,10 +326,10 @@ impl ProductMetadata {
     }
 
     /// Permanently deletes the record.
-    pub async fn delete_by_pk(ctx: &mut crate::RequestContext, id: Vec<u8>) -> Result<(), lightx::core::AppError> {
+    pub async fn delete_by_pk(ctx: &mut crate::RequestContext, id: &[u8]) -> Result<(), lightx::core::AppError> {
         let tx = ctx.get_or_create_default_tx().await?;
         sqlx::query(r#"DELETE FROM product_metadata WHERE `id` = ?"#)
-        .bind(&id)
+        .bind(id)
         .execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(())
     }
@@ -356,10 +356,10 @@ impl UserRoles {
     }
 
     /// Retrieves a record via its primary key. SQL syntax validation at compile time.
-    pub async fn get_by_pk(ctx: &mut crate::RequestContext, role_name: String, user_id: i64) -> Result<Option<Self>, lightx::core::AppError> {
+    pub async fn get_by_pk(ctx: &mut crate::RequestContext, role_name: &str, user_id: i64) -> Result<Option<Self>, lightx::core::AppError> {
         let tx = ctx.get_or_create_default_tx().await?;
         let record = sqlx::query_as(r#"SELECT * FROM user_roles WHERE `role_name` = ? AND `user_id` = ?"#)
-        .bind(&role_name)
+        .bind(role_name)
         .bind(&user_id)
         .fetch_optional(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(record)
@@ -377,10 +377,10 @@ impl UserRoles {
     }
 
     /// Permanently deletes the record.
-    pub async fn delete_by_pk(ctx: &mut crate::RequestContext, role_name: String, user_id: i64) -> Result<(), lightx::core::AppError> {
+    pub async fn delete_by_pk(ctx: &mut crate::RequestContext, role_name: &str, user_id: i64) -> Result<(), lightx::core::AppError> {
         let tx = ctx.get_or_create_default_tx().await?;
         sqlx::query(r#"DELETE FROM user_roles WHERE `role_name` = ? AND `user_id` = ?"#)
-        .bind(&role_name)
+        .bind(role_name)
         .bind(&user_id)
         .execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(())

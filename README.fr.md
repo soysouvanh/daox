@@ -1,3 +1,5 @@
+[English](README.md) | [Français](README.fr.md)
+
 # Daox Framework
 
 [![Crates.io](https://img.shields.io/crates/v/daox.svg)](https://crates.io/crates/daox)
@@ -12,16 +14,22 @@ Ce dépôt héberge l'ensemble de l'espace de travail (workspace) du code source
 
 ## Structure du workspace
 
-Ce dépôt est organisé en tant que Cargo workspace et contient les répertoires suivants :
+Voici comment s'organise l'écosystème Daox au travers de ce Cargo workspace :
 
-### 1. `daox/` (Le coeur du framework)
+```text
+daox-workspace/
+├── docker-compose.yml      # Automatisation des BDD (PostgreSQL, MySQL)
+├── init_*.sql              # Schémas de base pré-chargés par Docker
+├── daox/                   # Le framework principal (publié sur crates.io)
+│   ├── src/                # Builders de dialecte, parser AOP, logique macro
+│   └── assets/             # Diagrammes SVG explicatifs de l'architecture
+│
+└── daox-test/              # Tests d'intégration & Documentation vivante
+    ├── src/models/         # DAOs auto-générés (lors du build.rs)
+    └── src/main.rs         # Workflows de démo (Streams, Pagination, Patching)
+```
 
-C'est ici que réside le code principal du framework. Ce répertoire contient la logique d'introspection de schéma et le générateur de code à la compilation.  
 -> **[Lire la documentation officielle et le guide de démarrage ici](./daox/README.fr.md)**
-
-### 2. `daox-test/` (Tests d'intégration et démo)
-
-Ce dossier contient la suite de tests complète et l'application de démonstration permettant de prouver la portabilité absolue du framework. Il déploie automatiquement des bases de données via Docker Compose et exécute les classes DAO générées sur les trois dialectes SQL supportés.
 
 ---
 

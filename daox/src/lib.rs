@@ -1004,7 +1004,13 @@ message = "Le nom de famille doit faire au moins 5 caractères (Surcharge manuel
                 let pk_args = pk_cols
                     .iter()
                     .map(|(n, m)| {
-                        format!("{}: {}", Self::escape_rust_keyword(n), m.rust_type.value())
+                        let raw_t = m.rust_type.value();
+                        let arg_type = match raw_t.as_str() {
+                            "String" => "&str",
+                            "Vec<u8>" => "&[u8]",
+                            other => other,
+                        };
+                        format!("{}: {}", Self::escape_rust_keyword(n), arg_type)
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -1034,9 +1040,14 @@ message = "Le nom de famille doit faire au moins 5 caractères (Surcharge manuel
                     table_name_q, pk_where
                 ));
 
-                for (col_name, _) in &pk_cols {
+                for (col_name, m) in &pk_cols {
                     let field = Self::escape_rust_keyword(col_name);
-                    code.push_str(&format!("        .bind(&{})\n", field));
+                    let raw_t = m.rust_type.value();
+                    if raw_t == "String" || raw_t == "Vec<u8>" {
+                        code.push_str(&format!("        .bind({})\n", field));
+                    } else {
+                        code.push_str(&format!("        .bind(&{})\n", field));
+                    }
                 }
                 code.push_str("        .fetch_optional(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;\n");
                 code.push_str("        Ok(record)\n");
@@ -1105,7 +1116,13 @@ message = "Le nom de famille doit faire au moins 5 caractères (Surcharge manuel
                 let pk_args = pk_cols
                     .iter()
                     .map(|(n, m)| {
-                        format!("{}: {}", Self::escape_rust_keyword(n), m.rust_type.value())
+                        let raw_t = m.rust_type.value();
+                        let arg_type = match raw_t.as_str() {
+                            "String" => "&str",
+                            "Vec<u8>" => "&[u8]",
+                            other => other,
+                        };
+                        format!("{}: {}", Self::escape_rust_keyword(n), arg_type)
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -1135,9 +1152,14 @@ message = "Le nom de famille doit faire au moins 5 caractères (Surcharge manuel
                     table_name_q, pk_where
                 ));
 
-                for (col_name, _) in &pk_cols {
+                for (col_name, m) in &pk_cols {
                     let field = Self::escape_rust_keyword(col_name);
-                    code.push_str(&format!("        .bind(&{})\n", field));
+                    let raw_t = m.rust_type.value();
+                    if raw_t == "String" || raw_t == "Vec<u8>" {
+                        code.push_str(&format!("        .bind({})\n", field));
+                    } else {
+                        code.push_str(&format!("        .bind(&{})\n", field));
+                    }
                 }
                 code.push_str("        .execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;\n");
                 code.push_str("        Ok(())\n");

@@ -1,3 +1,5 @@
+[English](README.md) | [Français](README.fr.md)
+
 # Daox
 
 [![Crates.io](https://img.shields.io/crates/v/daox.svg)](https://crates.io/crates/daox)

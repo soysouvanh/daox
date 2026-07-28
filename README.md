@@ -1,3 +1,5 @@
+[English](README.md) | [Français](README.fr.md)
+
 # Daox Framework
 
 [![Crates.io](https://img.shields.io/crates/v/daox.svg)](https://crates.io/crates/daox)
@@ -12,16 +14,22 @@ This repository hosts the entire source code workspace for the Daox ecosystem.
 
 ## Workspace structure
 
-This repository is organized as a Cargo workspace containing the following directories:
+Here is how the Daox ecosystem is organized as a Cargo workspace:
 
-### 1. `daox/` (The core library)
+```text
+daox-workspace/
+├── docker-compose.yml      # DB automation config (PostgreSQL, MySQL)
+├── init_*.sql              # Base schemas auto-loaded by Docker
+├── daox/                   # The core framework (published on crates.io)
+│   ├── src/                # Dialect builders, AOP parsers, macro logic
+│   └── assets/             # Explanatory SVG architecture diagrams
+│
+└── daox-test/              # Integration tests & Living documentation
+    ├── src/models/         # Auto-generated DAOs (by build.rs)
+    └── src/main.rs         # Demonstration workflows (Streams, Pagination, Patching)
+```
 
-This is the heart of the framework. It contains the schema introspection logic and the compile-time code generator.  
 -> **[Read the official Documentation & Quickstart here](./daox/README.md)**
-
-### 2. `daox-test/` (Integration tests & demo)
-
-This folder contains the complete test suite and demonstration application to prove the framework's absolute portability. It automatically spins up databases via Docker Compose and runs the generated DAOs against all three supported SQL dialects.
 
 ---
 
