@@ -1,8 +1,12 @@
 [package]
 name = "daox-test"
-version = "0.1.0"
-edition = "2021"
-publish = false # Prevent this test suite from being published to crates.io
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Integration test suite for the Daox framework."
+license.workspace = true
+repository.workspace = true
+publish = false                                                # Prevent this test suite from being published to crates.io
 
 
 [dependencies]
