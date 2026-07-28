@@ -4,16 +4,19 @@
 
 pub struct RequestContext {
     pub raw_body: lightx::ext::bytes::Bytes,
+    pub global_state: std::sync::Arc<lightx::ext::tokio::sync::broadcast::Sender<lightx::ext::bytes::Bytes>>,
     pub rate_limiter: std::sync::Arc<lightx::ext::moka::sync::Cache<(std::net::IpAddr, &'static str), std::sync::Arc<std::sync::atomic::AtomicU32>>>,
     pub response_cache: std::sync::Arc<lightx::ext::moka::sync::Cache<String, (lightx::ext::hyper::StatusCode, lightx::ext::hyper::HeaderMap, lightx::ext::bytes::Bytes, std::time::Instant)>>,
     pub client_ip: std::net::IpAddr,
     pub user_id: std::option::Option<String>,
     pub headers: lightx::ext::hyper::HeaderMap,
+    pub raw_req: Option<lightx::ext::hyper::Request<lightx::ext::hyper::body::Incoming>>,
     pub default_pool: sqlx::MySqlPool,
     pub default_tx: Option<sqlx::Transaction<'static, sqlx::MySql>>,
 }
 
 pub struct AppContextFactory {
+    pub global_state: std::sync::Arc<lightx::ext::tokio::sync::broadcast::Sender<lightx::ext::bytes::Bytes>>,
     pub rate_limiter: std::sync::Arc<lightx::ext::moka::sync::Cache<(std::net::IpAddr, &'static str), std::sync::Arc<std::sync::atomic::AtomicU32>>>,
     pub response_cache: std::sync::Arc<lightx::ext::moka::sync::Cache<String, (lightx::ext::hyper::StatusCode, lightx::ext::hyper::HeaderMap, lightx::ext::bytes::Bytes, std::time::Instant)>>,
     pub default_pool: sqlx::MySqlPool,
@@ -22,6 +25,7 @@ pub struct AppContextFactory {
 impl AppContextFactory {
     pub async fn new() -> Result<Self, lightx::core::AppError> {
         Ok(Self {
+            global_state: std::sync::Arc::new(lightx::ext::tokio::sync::broadcast::channel(1024).0),
             rate_limiter: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().build()),
             response_cache: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().build()),
             default_pool: sqlx::mysql::MySqlPoolOptions::new().connect(&std::env::var("DEFAULT_DATABASE_URL").or_else(|_| std::env::var("DATABASE_URL")).unwrap_or_else(|_| "mysql://root:root@127.0.0.1:3306/my_database".to_string())).await.map_err(|e| lightx::core::AppError::SystemError { msg: e.to_string(), file: file!(), line: line!() })?,
@@ -31,7 +35,7 @@ impl AppContextFactory {
 
 impl lightx::server::ContextFactory for AppContextFactory {
     type Context = RequestContext;
-    fn create_context(&self, peer_addr: std::net::IpAddr, headers: lightx::ext::hyper::HeaderMap, raw_body: lightx::ext::bytes::Bytes) -> Self::Context {
+    fn create_context(&self, peer_addr: std::net::IpAddr, headers: lightx::ext::hyper::HeaderMap, raw_body: lightx::ext::bytes::Bytes, raw_req: Option<lightx::ext::hyper::Request<lightx::ext::hyper::body::Incoming>>) -> Self::Context {
         let mut client_ip = peer_addr;
         if let Some(xff) = headers.get("x-forwarded-for") {
             if let Ok(s) = xff.to_str() {
@@ -46,15 +50,22 @@ impl lightx::server::ContextFactory for AppContextFactory {
         }
         RequestContext {
             raw_body,
+            global_state: self.global_state.clone(),
             rate_limiter: self.rate_limiter.clone(),
             response_cache: self.response_cache.clone(),
             client_ip,
             user_id: None,
             headers,
+            raw_req,
             default_pool: self.default_pool.clone(),
             default_tx: None,
         }
     }
+
+    fn is_ip_blocked(&self, _client_ip: &std::net::IpAddr) -> bool {
+        false
+    }
+
     fn commit_context<'a>(&'a self, ctx: &'a mut Self::Context) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
         Box::pin(async move {
             if let Some(tx) = ctx.default_tx.take() {
@@ -69,12 +80,31 @@ impl RequestContext {
     pub async fn new_sandbox_context() -> Result<Self, lightx::core::AppError> {
         let mut ctx = Self {
             raw_body: lightx::ext::bytes::Bytes::new(),
+            global_state: std::sync::Arc::new(lightx::ext::tokio::sync::broadcast::channel(1).0),
             rate_limiter: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().max_capacity(1).build()),
             response_cache: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().max_capacity(1).build()),
             client_ip: "127.0.0.1".parse().unwrap(),
             user_id: None,
             headers: lightx::ext::hyper::HeaderMap::new(),
+            raw_req: None,
             default_pool: sqlx::mysql::MySqlPoolOptions::new().connect(&std::env::var("DEFAULT_DATABASE_URL").or_else(|_| std::env::var("DATABASE_URL")).unwrap_or_else(|_| "mysql://root:root@127.0.0.1:3306/my_database".to_string())).await.map_err(|e| lightx::core::AppError::SystemError { msg: e.to_string(), file: file!(), line: line!() })?,
+            default_tx: None,
+        };
+        ctx.get_or_create_default_tx().await?;
+        Ok(ctx)
+    }
+
+    pub async fn clone_for_sandbox(&self) -> Result<Self, lightx::core::AppError> {
+        let mut ctx = Self {
+            raw_body: lightx::ext::bytes::Bytes::new(),
+            global_state: self.global_state.clone(),
+            rate_limiter: self.rate_limiter.clone(),
+            response_cache: self.response_cache.clone(),
+            client_ip: self.client_ip.clone(),
+            user_id: self.user_id.clone(),
+            headers: self.headers.clone(),
+            raw_req: None,
+            default_pool: self.default_pool.clone(),
             default_tx: None,
         };
         ctx.get_or_create_default_tx().await?;
@@ -83,6 +113,11 @@ impl RequestContext {
 
     pub async fn rollback_all_sandbox_tx(&mut self) -> Result<(), lightx::core::AppError> {
         self.rollback_default_tx().await?;
+        Ok(())
+    }
+
+    pub async fn commit_all_sandbox_tx(&mut self) -> Result<(), lightx::core::AppError> {
+        self.commit_default_tx().await?;
         Ok(())
     }
 
