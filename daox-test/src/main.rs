@@ -1,3 +1,5 @@
+#![allow(clippy::ptr_arg)]
+
 pub mod models_mysql;
 pub mod models_pg;
 pub mod models_sqlite;

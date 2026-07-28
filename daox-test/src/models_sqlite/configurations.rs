@@ -85,7 +85,7 @@ impl Configurations {
     /// Returns the generated ID (or 0 if the table doesn't have an auto-increment ID).
     pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "INSERT INTO configurations (\"type\", \"match\", value) VALUES (?, ?, ?)";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(&self.r#type)
             .bind(&self.r#match)
             .bind(&self.value)
@@ -122,7 +122,7 @@ impl Configurations {
     /// This is highly recommended for data synchronization tasks.
     pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "INSERT INTO configurations (\"type\", \"match\", value) VALUES (?, ?, ?)";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(&self.r#type)
             .bind(&self.r#match)
             .bind(&self.value)
@@ -137,11 +137,11 @@ impl Configurations {
     /// to save network bandwidth and database disk I/O.
     pub async fn update_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "UPDATE configurations SET \"type\" = ?, \"match\" = ?, value = ? WHERE id = ?";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(&self.r#type)
             .bind(&self.r#match)
             .bind(&self.value)
-            .bind(&self.id)
+            .bind(self.id)
             .execute(executor).await?;
         Ok(result.rows_affected())
     }
@@ -151,7 +151,7 @@ impl Configurations {
     /// Returns the number of affected rows (1 if deleted, 0 if it didn't exist).
     pub async fn delete_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E, id: &i64) -> sqlx::Result<u64> {
         let query = "DELETE FROM configurations WHERE id = ?";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(id)
             .execute(executor).await?;
         Ok(result.rows_affected())
@@ -218,7 +218,7 @@ impl Configurations {
         }
 
         query_builder.push(" WHERE id = ");
-        query_builder.push_bind(id.clone());
+        query_builder.push_bind(*id);
 
         let result = query_builder.build().execute(executor).await?;
         Ok(result.rows_affected())

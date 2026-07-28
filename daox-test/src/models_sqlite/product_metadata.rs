@@ -85,7 +85,7 @@ impl ProductMetadata {
     /// Returns the generated ID (or 0 if the table doesn't have an auto-increment ID).
     pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "INSERT INTO product_metadata (id, category, attributes, raw_data) VALUES (?, ?, ?, ?)";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(&self.id)
             .bind(&self.category)
             .bind(&self.attributes)
@@ -124,7 +124,7 @@ impl ProductMetadata {
     /// This is highly recommended for data synchronization tasks.
     pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "INSERT INTO product_metadata (id, category, attributes, raw_data) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET id = EXCLUDED.id, category = EXCLUDED.category, attributes = EXCLUDED.attributes, raw_data = EXCLUDED.raw_data";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(&self.id)
             .bind(&self.category)
             .bind(&self.attributes)
@@ -140,7 +140,7 @@ impl ProductMetadata {
     /// to save network bandwidth and database disk I/O.
     pub async fn update_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "UPDATE product_metadata SET category = ?, attributes = ?, raw_data = ? WHERE id = ?";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(&self.category)
             .bind(&self.attributes)
             .bind(&self.raw_data)
@@ -154,7 +154,7 @@ impl ProductMetadata {
     /// Returns the number of affected rows (1 if deleted, 0 if it didn't exist).
     pub async fn delete_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E, id: &String) -> sqlx::Result<u64> {
         let query = "DELETE FROM product_metadata WHERE id = ?";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(id)
             .execute(executor).await?;
         Ok(result.rows_affected())

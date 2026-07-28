@@ -123,12 +123,12 @@ impl Users {
     /// Returns the generated ID (or 0 if the table doesn't have an auto-increment ID).
     pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "INSERT INTO users (email, first_name, last_name, status, created_at) VALUES (?, ?, ?, ?, ?)";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(&self.email)
             .bind(&self.first_name)
             .bind(&self.last_name)
             .bind(&self.status)
-            .bind(&self.created_at)
+            .bind(self.created_at)
             .execute(executor).await?;
         Ok(result.last_insert_id())
     }
@@ -148,7 +148,7 @@ impl Users {
             b.push_bind(&item.first_name);
             b.push_bind(&item.last_name);
             b.push_bind(&item.status);
-            b.push_bind(&item.created_at);
+            b.push_bind(item.created_at);
         });
         let result = query_builder.build().execute(executor).await?;
         Ok(result.rows_affected())
@@ -164,12 +164,12 @@ impl Users {
     /// This is highly recommended for data synchronization tasks.
     pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "INSERT INTO users (email, first_name, last_name, status, created_at) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE email = VALUES(email), first_name = VALUES(first_name), last_name = VALUES(last_name), status = VALUES(status), created_at = VALUES(created_at)";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(&self.email)
             .bind(&self.first_name)
             .bind(&self.last_name)
             .bind(&self.status)
-            .bind(&self.created_at)
+            .bind(self.created_at)
             .execute(executor).await?;
         Ok(result.rows_affected())
     }
@@ -181,13 +181,13 @@ impl Users {
     /// to save network bandwidth and database disk I/O.
     pub async fn update_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "UPDATE users SET email = ?, first_name = ?, last_name = ?, status = ?, created_at = ? WHERE id = ?";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(&self.email)
             .bind(&self.first_name)
             .bind(&self.last_name)
             .bind(&self.status)
-            .bind(&self.created_at)
-            .bind(&self.id)
+            .bind(self.created_at)
+            .bind(self.id)
             .execute(executor).await?;
         Ok(result.rows_affected())
     }
@@ -197,7 +197,7 @@ impl Users {
     /// Returns the number of affected rows (1 if deleted, 0 if it didn't exist).
     pub async fn delete_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, id: &i64) -> sqlx::Result<u64> {
         let query = "DELETE FROM users WHERE id = ?";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(id)
             .execute(executor).await?;
         Ok(result.rows_affected())
@@ -223,10 +223,10 @@ impl Users {
     /// **Warning:** This overwrites all columns (except the index columns) with the values from the current struct.
     pub async fn update_by_last_name_and_first_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "UPDATE users SET email = ?, status = ?, created_at = ? WHERE last_name = ? AND first_name = ?";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(&self.email)
             .bind(&self.status)
-            .bind(&self.created_at)
+            .bind(self.created_at)
             .bind(&self.last_name)
             .bind(&self.first_name)
             .execute(executor).await?;
@@ -238,7 +238,7 @@ impl Users {
     /// Returns the number of affected rows.
     pub async fn delete_by_last_name_and_first_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, last_name: &String, first_name: &Option<String>) -> sqlx::Result<u64> {
         let query = "DELETE FROM users WHERE last_name = ? AND first_name = ?";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(last_name)
             .bind(first_name)
             .execute(executor).await?;
@@ -250,11 +250,11 @@ impl Users {
     /// **Warning:** This overwrites all columns (except the index columns) with the values from the current struct.
     pub async fn update_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "UPDATE users SET first_name = ?, last_name = ?, status = ?, created_at = ? WHERE email = ?";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(&self.first_name)
             .bind(&self.last_name)
             .bind(&self.status)
-            .bind(&self.created_at)
+            .bind(self.created_at)
             .bind(&self.email)
             .execute(executor).await?;
         Ok(result.rows_affected())
@@ -265,7 +265,7 @@ impl Users {
     /// Returns the number of affected rows.
     pub async fn delete_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, email: &String) -> sqlx::Result<u64> {
         let query = "DELETE FROM users WHERE email = ?";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(email)
             .execute(executor).await?;
         Ok(result.rows_affected())
@@ -320,7 +320,7 @@ impl Users {
         if let Some(val) = &patch.created_at {
             has_fields = true;
             separated.push("created_at = ");
-            separated.push_bind_unseparated(val.clone());
+            separated.push_bind_unseparated(*val);
         }
 
         if !has_fields {
@@ -329,7 +329,7 @@ impl Users {
         }
 
         query_builder.push(" WHERE id = ");
-        query_builder.push_bind(id.clone());
+        query_builder.push_bind(*id);
 
         let result = query_builder.build().execute(executor).await?;
         Ok(result.rows_affected())

@@ -98,7 +98,7 @@ impl UserRoles {
     /// Creates a zero-allocation Asynchronous Stream using the `idx_user_id` index.
     pub fn stream_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql> + 'e>(executor: E, user_id: &i64) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
         let query = "SELECT * FROM user_roles WHERE user_id = ?";
-        sqlx::query_as::<_, Self>(query).bind(user_id.clone()).fetch(executor)
+        sqlx::query_as::<_, Self>(query).bind(*user_id).fetch(executor)
     }
 
 }
@@ -112,10 +112,10 @@ impl UserRoles {
     /// Returns the generated ID (or 0 if the table doesn't have an auto-increment ID).
     pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "INSERT INTO user_roles (user_id, role_name, assigned_at) VALUES (?, ?, ?)";
-        let result = sqlx::query(&query)
-            .bind(&self.user_id)
+        let result = sqlx::query(query)
+            .bind(self.user_id)
             .bind(&self.role_name)
-            .bind(&self.assigned_at)
+            .bind(self.assigned_at)
             .execute(executor).await?;
         Ok(result.last_insert_id())
     }
@@ -131,9 +131,9 @@ impl UserRoles {
         if items.is_empty() { return Ok(0); }
         let mut query_builder: sqlx::QueryBuilder<sqlx::MySql> = sqlx::QueryBuilder::new("INSERT INTO user_roles (user_id, role_name, assigned_at) ");
         query_builder.push_values(items, |mut b, item| {
-            b.push_bind(&item.user_id);
+            b.push_bind(item.user_id);
             b.push_bind(&item.role_name);
-            b.push_bind(&item.assigned_at);
+            b.push_bind(item.assigned_at);
         });
         let result = query_builder.build().execute(executor).await?;
         Ok(result.rows_affected())
@@ -149,10 +149,10 @@ impl UserRoles {
     /// This is highly recommended for data synchronization tasks.
     pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "INSERT INTO user_roles (user_id, role_name, assigned_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), role_name = VALUES(role_name), assigned_at = VALUES(assigned_at)";
-        let result = sqlx::query(&query)
-            .bind(&self.user_id)
+        let result = sqlx::query(query)
+            .bind(self.user_id)
             .bind(&self.role_name)
-            .bind(&self.assigned_at)
+            .bind(self.assigned_at)
             .execute(executor).await?;
         Ok(result.rows_affected())
     }
@@ -164,9 +164,9 @@ impl UserRoles {
     /// to save network bandwidth and database disk I/O.
     pub async fn update_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "UPDATE user_roles SET assigned_at = ? WHERE user_id = ? AND role_name = ?";
-        let result = sqlx::query(&query)
-            .bind(&self.assigned_at)
-            .bind(&self.user_id)
+        let result = sqlx::query(query)
+            .bind(self.assigned_at)
+            .bind(self.user_id)
             .bind(&self.role_name)
             .execute(executor).await?;
         Ok(result.rows_affected())
@@ -177,7 +177,7 @@ impl UserRoles {
     /// Returns the number of affected rows (1 if deleted, 0 if it didn't exist).
     pub async fn delete_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, user_id: &i64, role_name: &String) -> sqlx::Result<u64> {
         let query = "DELETE FROM user_roles WHERE user_id = ? AND role_name = ?";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(user_id)
             .bind(role_name)
             .execute(executor).await?;
@@ -189,9 +189,9 @@ impl UserRoles {
     /// **Warning:** This overwrites all columns (except the index columns) with the values from the current struct.
     pub async fn update_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "UPDATE user_roles SET assigned_at = ? WHERE user_id = ? AND role_name = ?";
-        let result = sqlx::query(&query)
-            .bind(&self.assigned_at)
-            .bind(&self.user_id)
+        let result = sqlx::query(query)
+            .bind(self.assigned_at)
+            .bind(self.user_id)
             .bind(&self.role_name)
             .execute(executor).await?;
         Ok(result.rows_affected())
@@ -202,7 +202,7 @@ impl UserRoles {
     /// Returns the number of affected rows.
     pub async fn delete_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, user_id: &i64, role_name: &String) -> sqlx::Result<u64> {
         let query = "DELETE FROM user_roles WHERE user_id = ? AND role_name = ?";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(user_id)
             .bind(role_name)
             .execute(executor).await?;
@@ -214,9 +214,9 @@ impl UserRoles {
     /// **Warning:** This overwrites all columns (except the index columns) with the values from the current struct.
     pub async fn update_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "UPDATE user_roles SET assigned_at = ? WHERE user_id = ?";
-        let result = sqlx::query(&query)
-            .bind(&self.assigned_at)
-            .bind(&self.user_id)
+        let result = sqlx::query(query)
+            .bind(self.assigned_at)
+            .bind(self.user_id)
             .execute(executor).await?;
         Ok(result.rows_affected())
     }
@@ -226,7 +226,7 @@ impl UserRoles {
     /// Returns the number of affected rows.
     pub async fn delete_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, user_id: &i64) -> sqlx::Result<u64> {
         let query = "DELETE FROM user_roles WHERE user_id = ?";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(user_id)
             .execute(executor).await?;
         Ok(result.rows_affected())
@@ -257,7 +257,7 @@ impl UserRoles {
         if let Some(val) = &patch.assigned_at {
             has_fields = true;
             separated.push("assigned_at = ");
-            separated.push_bind_unseparated(val.clone());
+            separated.push_bind_unseparated(*val);
         }
 
         if !has_fields {
@@ -266,7 +266,7 @@ impl UserRoles {
         }
 
         query_builder.push(" WHERE user_id = ");
-        query_builder.push_bind(user_id.clone());
+        query_builder.push_bind(*user_id);
         query_builder.push(" AND role_name = ");
         query_builder.push_bind(role_name.clone());
 

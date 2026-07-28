@@ -123,12 +123,12 @@ impl Users {
     /// Returns the generated ID (or 0 if the table doesn't have an auto-increment ID).
     pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "INSERT INTO users (email, first_name, last_name, status, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING id::bigint";
-        let (id,): (i64,) = sqlx::query_as(&query)
+        let (id,): (i64,) = sqlx::query_as(query)
             .bind(&self.email)
             .bind(&self.first_name)
             .bind(&self.last_name)
             .bind(&self.status)
-            .bind(&self.created_at)
+            .bind(self.created_at)
             .fetch_one(executor).await?;
         Ok(id as u64)
     }
@@ -148,7 +148,7 @@ impl Users {
             b.push_bind(&item.first_name);
             b.push_bind(&item.last_name);
             b.push_bind(&item.status);
-            b.push_bind(&item.created_at);
+            b.push_bind(item.created_at);
         });
         let result = query_builder.build().execute(executor).await?;
         Ok(result.rows_affected())
@@ -164,12 +164,12 @@ impl Users {
     /// This is highly recommended for data synchronization tasks.
     pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "INSERT INTO users (email, first_name, last_name, status, created_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email, first_name = EXCLUDED.first_name, last_name = EXCLUDED.last_name, status = EXCLUDED.status, created_at = EXCLUDED.created_at";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(&self.email)
             .bind(&self.first_name)
             .bind(&self.last_name)
             .bind(&self.status)
-            .bind(&self.created_at)
+            .bind(self.created_at)
             .execute(executor).await?;
         Ok(result.rows_affected())
     }
@@ -181,13 +181,13 @@ impl Users {
     /// to save network bandwidth and database disk I/O.
     pub async fn update_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "UPDATE users SET email = $1, first_name = $2, last_name = $3, status = $4, created_at = $5 WHERE id = $6";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(&self.email)
             .bind(&self.first_name)
             .bind(&self.last_name)
             .bind(&self.status)
-            .bind(&self.created_at)
-            .bind(&self.id)
+            .bind(self.created_at)
+            .bind(self.id)
             .execute(executor).await?;
         Ok(result.rows_affected())
     }
@@ -197,7 +197,7 @@ impl Users {
     /// Returns the number of affected rows (1 if deleted, 0 if it didn't exist).
     pub async fn delete_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, id: &i64) -> sqlx::Result<u64> {
         let query = "DELETE FROM users WHERE id = $1";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(id)
             .execute(executor).await?;
         Ok(result.rows_affected())
@@ -223,11 +223,11 @@ impl Users {
     /// **Warning:** This overwrites all columns (except the index columns) with the values from the current struct.
     pub async fn update_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "UPDATE users SET first_name = $1, last_name = $2, status = $3, created_at = $4 WHERE email = $5";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(&self.first_name)
             .bind(&self.last_name)
             .bind(&self.status)
-            .bind(&self.created_at)
+            .bind(self.created_at)
             .bind(&self.email)
             .execute(executor).await?;
         Ok(result.rows_affected())
@@ -238,7 +238,7 @@ impl Users {
     /// Returns the number of affected rows.
     pub async fn delete_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, email: &String) -> sqlx::Result<u64> {
         let query = "DELETE FROM users WHERE email = $1";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(email)
             .execute(executor).await?;
         Ok(result.rows_affected())
@@ -249,10 +249,10 @@ impl Users {
     /// **Warning:** This overwrites all columns (except the index columns) with the values from the current struct.
     pub async fn update_by_last_name_and_first_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "UPDATE users SET email = $1, status = $2, created_at = $3 WHERE last_name = $4 AND first_name = $5";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(&self.email)
             .bind(&self.status)
-            .bind(&self.created_at)
+            .bind(self.created_at)
             .bind(&self.last_name)
             .bind(&self.first_name)
             .execute(executor).await?;
@@ -264,7 +264,7 @@ impl Users {
     /// Returns the number of affected rows.
     pub async fn delete_by_last_name_and_first_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, last_name: &String, first_name: &Option<String>) -> sqlx::Result<u64> {
         let query = "DELETE FROM users WHERE last_name = $1 AND first_name = $2";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(last_name)
             .bind(first_name)
             .execute(executor).await?;
@@ -320,7 +320,7 @@ impl Users {
         if let Some(val) = &patch.created_at {
             has_fields = true;
             separated.push("created_at = ");
-            separated.push_bind_unseparated(val.clone());
+            separated.push_bind_unseparated(*val);
         }
 
         if !has_fields {
@@ -329,7 +329,7 @@ impl Users {
         }
 
         query_builder.push(" WHERE id = ");
-        query_builder.push_bind(id.clone());
+        query_builder.push_bind(*id);
 
         let result = query_builder.build().execute(executor).await?;
         Ok(result.rows_affected())

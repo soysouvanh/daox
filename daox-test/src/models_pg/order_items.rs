@@ -76,10 +76,10 @@ impl OrderItems {
     /// Returns the generated ID (or 0 if the table doesn't have an auto-increment ID).
     pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "INSERT INTO order_items (order_id, product_id, quantity) VALUES ($1, $2, $3) RETURNING order_id::bigint";
-        let (id,): (i64,) = sqlx::query_as(&query)
-            .bind(&self.order_id)
-            .bind(&self.product_id)
-            .bind(&self.quantity)
+        let (id,): (i64,) = sqlx::query_as(query)
+            .bind(self.order_id)
+            .bind(self.product_id)
+            .bind(self.quantity)
             .fetch_one(executor).await?;
         Ok(id as u64)
     }
@@ -95,9 +95,9 @@ impl OrderItems {
         if items.is_empty() { return Ok(0); }
         let mut query_builder: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new("INSERT INTO order_items (order_id, product_id, quantity) ");
         query_builder.push_values(items, |mut b, item| {
-            b.push_bind(&item.order_id);
-            b.push_bind(&item.product_id);
-            b.push_bind(&item.quantity);
+            b.push_bind(item.order_id);
+            b.push_bind(item.product_id);
+            b.push_bind(item.quantity);
         });
         let result = query_builder.build().execute(executor).await?;
         Ok(result.rows_affected())
@@ -113,10 +113,10 @@ impl OrderItems {
     /// This is highly recommended for data synchronization tasks.
     pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "INSERT INTO order_items (order_id, product_id, quantity) VALUES ($1, $2, $3) ON CONFLICT (order_id, product_id) DO UPDATE SET order_id = EXCLUDED.order_id, product_id = EXCLUDED.product_id, quantity = EXCLUDED.quantity";
-        let result = sqlx::query(&query)
-            .bind(&self.order_id)
-            .bind(&self.product_id)
-            .bind(&self.quantity)
+        let result = sqlx::query(query)
+            .bind(self.order_id)
+            .bind(self.product_id)
+            .bind(self.quantity)
             .execute(executor).await?;
         Ok(result.rows_affected())
     }
@@ -128,10 +128,10 @@ impl OrderItems {
     /// to save network bandwidth and database disk I/O.
     pub async fn update_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "UPDATE order_items SET quantity = $1 WHERE order_id = $2 AND product_id = $3";
-        let result = sqlx::query(&query)
-            .bind(&self.quantity)
-            .bind(&self.order_id)
-            .bind(&self.product_id)
+        let result = sqlx::query(query)
+            .bind(self.quantity)
+            .bind(self.order_id)
+            .bind(self.product_id)
             .execute(executor).await?;
         Ok(result.rows_affected())
     }
@@ -141,7 +141,7 @@ impl OrderItems {
     /// Returns the number of affected rows (1 if deleted, 0 if it didn't exist).
     pub async fn delete_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, order_id: &i64, product_id: &i64) -> sqlx::Result<u64> {
         let query = "DELETE FROM order_items WHERE order_id = $1 AND product_id = $2";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(order_id)
             .bind(product_id)
             .execute(executor).await?;
@@ -173,7 +173,7 @@ impl OrderItems {
         if let Some(val) = &patch.quantity {
             has_fields = true;
             separated.push("quantity = ");
-            separated.push_bind_unseparated(val.clone());
+            separated.push_bind_unseparated(*val);
         }
 
         if !has_fields {
@@ -182,9 +182,9 @@ impl OrderItems {
         }
 
         query_builder.push(" WHERE order_id = ");
-        query_builder.push_bind(order_id.clone());
+        query_builder.push_bind(*order_id);
         query_builder.push(" AND product_id = ");
-        query_builder.push_bind(product_id.clone());
+        query_builder.push_bind(*product_id);
 
         let result = query_builder.build().execute(executor).await?;
         Ok(result.rows_affected())

@@ -104,10 +104,10 @@ impl OrderItems {
         executor: E,
     ) -> sqlx::Result<u64> {
         let query = "INSERT INTO order_items (order_id, product_id, quantity) VALUES (?, ?, ?)";
-        let result = sqlx::query(&query)
-            .bind(&self.order_id)
-            .bind(&self.product_id)
-            .bind(&self.quantity)
+        let result = sqlx::query(query)
+            .bind(self.order_id)
+            .bind(self.product_id)
+            .bind(self.quantity)
             .execute(executor)
             .await?;
         Ok(result.last_insert_rowid() as u64)
@@ -130,9 +130,9 @@ impl OrderItems {
         let mut query_builder: sqlx::QueryBuilder<sqlx::Sqlite> =
             sqlx::QueryBuilder::new("INSERT INTO order_items (order_id, product_id, quantity) ");
         query_builder.push_values(items, |mut b, item| {
-            b.push_bind(&item.order_id);
-            b.push_bind(&item.product_id);
-            b.push_bind(&item.quantity);
+            b.push_bind(item.order_id);
+            b.push_bind(item.product_id);
+            b.push_bind(item.quantity);
         });
         let result = query_builder.build().execute(executor).await?;
         Ok(result.rows_affected())
@@ -151,10 +151,10 @@ impl OrderItems {
         executor: E,
     ) -> sqlx::Result<u64> {
         let query = "INSERT INTO order_items (order_id, product_id, quantity) VALUES (?, ?, ?)";
-        let result = sqlx::query(&query)
-            .bind(&self.order_id)
-            .bind(&self.product_id)
-            .bind(&self.quantity)
+        let result = sqlx::query(query)
+            .bind(self.order_id)
+            .bind(self.product_id)
+            .bind(self.quantity)
             .execute(executor)
             .await?;
         Ok(result.rows_affected())
@@ -170,10 +170,10 @@ impl OrderItems {
         executor: E,
     ) -> sqlx::Result<u64> {
         let query = "UPDATE order_items SET quantity = ? WHERE order_id = ? AND product_id = ?";
-        let result = sqlx::query(&query)
-            .bind(&self.quantity)
-            .bind(&self.order_id)
-            .bind(&self.product_id)
+        let result = sqlx::query(query)
+            .bind(self.quantity)
+            .bind(self.order_id)
+            .bind(self.product_id)
             .execute(executor)
             .await?;
         Ok(result.rows_affected())
@@ -188,7 +188,7 @@ impl OrderItems {
         product_id: &i64,
     ) -> sqlx::Result<u64> {
         let query = "DELETE FROM order_items WHERE order_id = ? AND product_id = ?";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(order_id)
             .bind(product_id)
             .execute(executor)
@@ -226,7 +226,7 @@ impl OrderItems {
         if let Some(val) = &patch.quantity {
             has_fields = true;
             separated.push("quantity = ");
-            separated.push_bind_unseparated(val.clone());
+            separated.push_bind_unseparated(*val);
         }
 
         if !has_fields {
@@ -235,9 +235,9 @@ impl OrderItems {
         }
 
         query_builder.push(" WHERE order_id = ");
-        query_builder.push_bind(order_id.clone());
+        query_builder.push_bind(*order_id);
         query_builder.push(" AND product_id = ");
-        query_builder.push_bind(product_id.clone());
+        query_builder.push_bind(*product_id);
 
         let result = query_builder.build().execute(executor).await?;
         Ok(result.rows_affected())

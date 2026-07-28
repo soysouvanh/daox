@@ -83,7 +83,7 @@ impl Currencies {
     /// Returns the generated ID (or 0 if the table doesn't have an auto-increment ID).
     pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "INSERT INTO currencies (code, name) VALUES ($1, $2)";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(&self.code)
             .bind(&self.name)
             .execute(executor).await?;
@@ -118,7 +118,7 @@ impl Currencies {
     /// This is highly recommended for data synchronization tasks.
     pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "INSERT INTO currencies (code, name) VALUES ($1, $2) ON CONFLICT (code) DO UPDATE SET code = EXCLUDED.code, name = EXCLUDED.name";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(&self.code)
             .bind(&self.name)
             .execute(executor).await?;
@@ -132,7 +132,7 @@ impl Currencies {
     /// to save network bandwidth and database disk I/O.
     pub async fn update_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
         let query = "UPDATE currencies SET name = $1 WHERE code = $2";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(&self.name)
             .bind(&self.code)
             .execute(executor).await?;
@@ -144,7 +144,7 @@ impl Currencies {
     /// Returns the number of affected rows (1 if deleted, 0 if it didn't exist).
     pub async fn delete_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, code: &String) -> sqlx::Result<u64> {
         let query = "DELETE FROM currencies WHERE code = $1";
-        let result = sqlx::query(&query)
+        let result = sqlx::query(query)
             .bind(code)
             .execute(executor).await?;
         Ok(result.rows_affected())
