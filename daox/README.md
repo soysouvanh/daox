@@ -33,10 +33,11 @@ Here is the **Database-first** approach visualized:
 
 ![Zero-allocation streams](./assets/streams.svg)
 
+- **SOTA Batch Operations & Upserts:** Deeply integrated, cross-dialect native `upserts` (using `ON CONFLICT` for PG/SQLite and `ON DUPLICATE KEY` for MySQL) ensuring fully scalable ACID atomicity effortlessly via `upsert_many`.
 - **Smart patching:** Send partial network updates (`update_partial_by_pk`) to save bandwidth and reduce database disk writes (WAL).
-- **Dialect-aware & injection safe:** Fully escapes reserved SQL keywords and uses prepared statements to strictly prevent SQL injections.
-- **Native multi-database routing:** Mix PostgreSQL, MySQL, and SQLite safely. Sub-schemas like `schema/[database]/[table]` automatically emit isolated Rust structs named `DatabaseTable` preventing any namespace collisions while cleanly mapping underlying SQL tables.
-- **Composite keys:** Full native support for tables with multiple primary keys.
+- **Dialect-aware & injection safe:** Fully escapes reserved SQL keywords dynamically parsing context via `databases.toml`.
+- **Native multi-database routing:** Mix PostgreSQL, MySQL, and SQLite safely. Sub-schemas like `schema/[database]/[table]` automatically emit isolated Rust structs named `DatabaseTable` preventing any namespace collisions while cleanly mapping underlying SQL tables with Zero-Allocation operations.
+- **Composite keys and Secondary Indexes:** Native support with highly scalable batch generation bindings for multiple primary keys, automatic `get_by_{index}` and `delete_by_{index}`.
 
 ---
 
@@ -68,13 +69,13 @@ Open your `Cargo.toml` and add the following:
 ```toml
 [dependencies]
 # sqlx handles the actual database connection at runtime
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "mysql", "postgres", "sqlite"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "mysql", "postgres", "sqlite"] }
 # futures is required to handle Daox's asynchronous data streams
 futures = "0.3"
 
 [build-dependencies]
 # Daox runs at compile-time to generate your DAO code
-daox = "0.2.0"
+daox = "0.2.2"
 # Tokio provides the asynchronous runtime needed by Daox during generation
 tokio = { version = "1", features = ["full"] }
 ```
@@ -140,7 +141,7 @@ pub mod models; // Explicitly include the generated module
 
 use sqlx::postgres::PgPoolOptions;
 use futures::StreamExt; // Required for continuous data streams
-use models::users::{Users, UsersPatch}; // Import the generated structures
+use models::users::Users; // Import the generated structure
 
 #[tokio::main]
 async fn main() -> Result<(), sqlx::Error> {
@@ -156,18 +157,9 @@ async fn main() -> Result<(), sqlx::Error> {
     let user_id = new_user.insert(&pool).await?;
     println!("Inserted User ID: {}", user_id);
 
-    // --- CASE 2: UPSERT (Insert or Update on conflict) ---
-    let mut modified_user = new_user.clone();
-    modified_user.status = "banned".into();
-    modified_user.upsert(&pool).await?;
-
-    // --- CASE 3: SMART PATCHING (Partial Update) ---
-    // Update *only* the status. Daox will ignore the email field.
-    let patch = UsersPatch {
-        status: Some("inactive".into()),
-        ..Default::default()
-    };
-    Users::update_partial_by_pk(&pool, &(user_id as i64), &patch).await?;
+    // --- CASE 2: SMART PATCHING (Partial Update) ---
+    // Update *only* the status. Daox generates static pure-SQL Zero Allocation methods natively.
+    Users::update_status(&pool, &(user_id as i64), "inactive").await?;
 
     // --- CASE 4: ZERO-ALLOCATION STREAMING ---
     // Iterates cleanly without overflowing the system's memory
@@ -209,24 +201,19 @@ Daox understands your schema intimately. Based on your columns and indexes, it g
 
 ### Primary key (PK) driven methods
 
-- **`get_by_pk(executor, pk)`** ➔ Fetch one precise record.
-- **`exists_by_pk(executor, pk)`** ➔ Ultra-fast cache-friendly verify without pulling the full row.
-- **`update_by_pk(&self, executor)`** ➔ Fully overwrite the database record.
-- **`update_partial_by_pk(executor, pk, &Patch)`** ➔ Efficient partial field patching (saves WAL storage!).
-- **`delete_by_pk(executor, pk)`** ➔ Single record deletion.
-- **`delete_many_by_pk(executor, &[pk])`** ➔ Scalable mass deletion.
-- **`list_by_cursor(executor, last_id, limit)`** ➔ The SOTA **O(1) keyset pagination** for infinite scrolling feeds.
+- **`get_by_{id}(executor, pk)`** ➔ Fetch one precise record dynamically matching exactly the PK columns.
+- **`exists_by_{id}(executor, pk)`** ➔ Ultra-fast cache-friendly verify without pulling the full row.
+- **`update_by_{id}(&self, executor)`** ➔ Fully overwrite the database record.
+- **`update_{col}(executor, pk, val)`** ➔ Pure-SQL granular patch for each column. (Zero Allocation).
+- **`delete_by_{id}(executor, pk)`** ➔ Single record deletion.
+- **`delete_all(executor)`** ➔ Ultra-fast massive Truncate deletion.
 
 ### Auto-generated index methods
 
 Daox scans your DB indexes and maps perfectly optimized query methods.
 _(For example, an index on `email`)_
 
-- **`exists_by_<index>`** ➔ Example: **`exists_by_email`**
-- **`get_by_<index>`** ➔ _(For UNIQUE indexes)_ Example: **`get_by_email`**
-- **`list_by_<index>`** ➔ _(For standard indexes)_ Retrieve multiple matches.
-- **`stream_by_<index>`** ➔ Stream matches safely.
-- **`delete_by_<index>`** ➔ Efficient targeted deletion based on an index.
+- **`get_by_{colA_and_colB}`** ➔ Magically navigates UNIQUE and B-Tree Composite indexes allowing strictly typed multi-column fetching.
 
 ---
 

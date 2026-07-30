@@ -46,9 +46,10 @@ async fn main() {
     // Unlike MySQL/PG which run in Docker, SQLite is a local file.
     // We must physically create the file and initialize its schema right here in the build script.
 
-    let sqlite_db_path = "daox_test.sqlite";
-    if !Path::new(sqlite_db_path).exists() {
-        fs::File::create(sqlite_db_path).unwrap();
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    let sqlite_db_path = format!("{}/daox_test.sqlite", out_dir);
+    if !Path::new(&sqlite_db_path).exists() {
+        fs::File::create(&sqlite_db_path).unwrap();
     }
 
     let sqlite_url = format!("sqlite://{}", sqlite_db_path);
@@ -58,11 +59,11 @@ async fn main() {
         .unwrap();
 
     // Read the init SQL file and execute each query separated by `;` to build the tables.
-    let sqlite_schema = fs::read_to_string("../init_sqlite.sql").unwrap();
+    let sqlite_schema: &'static str = include_str!("../init_sqlite.sql");
     for query in sqlite_schema.split(";") {
         let q = query.trim();
         if !q.is_empty() {
-            sqlx::query(q).execute(&sqlite_pool).await.unwrap();
+            sqlx::Executor::execute(&sqlite_pool, q).await.unwrap();
         }
     }
 

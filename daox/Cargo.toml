@@ -18,7 +18,7 @@ sqlite = ["sqlx/sqlite"]
 
 [dependencies]
 # Database introspection (MySQL/MariaDB, PostgreSQL, SQLite)
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls"] }
 tokio = { version = "1", features = ["full"] }
 
 # Minimal dependencies (SOTA)

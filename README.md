@@ -55,13 +55,13 @@ Navigate into the test directory and run the engine of your choice. The `build.r
 cd daox-test
 
 # Test PostgreSQL dialect
-cargo run -- postgres
+DAOX_TEST_PG=1 cargo run
 
-# Test MySQL / MariaDB dialect
-cargo run -- mysql
+# Test MySQL / MariaDB dialect (Silently deployed by default)
+cargo run
 
-# Test SQLite dialect (creates a local .sqlite file automatically)
-cargo run -- sqlite
+# Test SQLite dialect (runs securely isolated within target/ OUT_DIR)
+DAOX_TEST_SQLITE=1 cargo run
 ```
 
 ---

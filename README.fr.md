@@ -55,13 +55,13 @@ Naviguez dans le répertoire de test et exécutez le moteur de votre choix. Le s
 cd daox-test
 
 # Tester le dialecte PostgreSQL
-cargo run -- postgres
+DAOX_TEST_PG=1 cargo run
 
-# Tester le dialecte MySQL / MariaDB
-cargo run -- mysql
+# Tester le dialecte MySQL / MariaDB (Défaut actif silencieusement)
+cargo run
 
-# Tester le dialecte SQLite (crée automatiquement un fichier local .sqlite)
-cargo run -- sqlite
+# Tester le dialecte SQLite (s'exécute dans target/ via OUT_DIR)
+DAOX_TEST_SQLITE=1 cargo run
 ```
 
 ---

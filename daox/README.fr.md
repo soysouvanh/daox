@@ -33,10 +33,11 @@ Voici l'approche **Database-first** (base de données d'abord) visualisée :
 
 ![Flux d'exécution sans allocation](./assets/streams_fr.svg)
 
+- **Opérations par lots et Upserts SOTA :** Intégration stricte et native des `upserts` multi-bases (via `ON CONFLICT` sur PG/SQLite et `ON DUPLICATE KEY` pour MySQL). Préparez des batch atomiques ultra massifs avec `insert_many` et `upsert_many`.
 - **Patching intelligent :** Envoyez des mises à jour partielles sur le réseau (`update_partial_by_pk`) pour économiser de la bande passante et réduire les écritures disque de la base (WAL).
-- **Conscient du dialecte et sécurisé contre les injections :** Échappe automatiquement les mots-clés SQL réservés et utilise des requêtes préparées pour prévenir de manière stricte les injections SQL.
-- **Support multi-base natif :** Mixez PostgreSQL, MySQL et SQLite en toute sécurité. Les schémas imbriqués (`schema/[base_de_données]/[table]`) émettent automatiquement des objets Rust isolés nommés `BaseDeDonneesTable`, empêchant la moindre collision d'espace de noms tout en retenant la véritable table SQL sous-jacente.
-- **Clés composites :** Support natif complet pour les tables avec des clés primaires multiples.
+- **Conscient du dialecte et sécurisé contre les injections :** Échappe automatiquement les mots-clés SQL réservés et identifie dynamiquement votre dialecte via `databases.toml`.
+- **Support multi-base dynamique :** Mixez PostgreSQL, MySQL et SQLite simultanément. L'introspection contourne les colisions dynamiquement et implante un workflow Zéro-Allocation.
+- **Clés composites et Index Secondaires :** Support de méthodes massives auto-générées (`get_by_{index}`, `delete_by_{index}`) avec des retours synchronisés sur Zéro-Allocation `Result<(), AppError>`.
 
 ---
 
@@ -68,13 +69,13 @@ Ouvrez votre `Cargo.toml` et ajoutez les lignes suivantes :
 ```toml
 [dependencies]
 # sqlx gère la connexion réelle à la base de données à l'exécution
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "mysql", "postgres", "sqlite"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "mysql", "postgres", "sqlite"] }
 # futures est requis pour gérer les flux de données asynchrones de Daox
 futures = "0.3"
 
 [build-dependencies]
 # Daox s'exécute à la compilation pour générer votre code DAO
-daox = "0.2.0"
+daox = "0.2.2"
 # Tokio fournit l'environnement d'exécution asynchrone dont Daox a besoin pendant la génération
 tokio = { version = "1", features = ["full"] }
 ```
@@ -140,7 +141,7 @@ pub mod models; // Inclure explicitement le module généré
 
 use sqlx::postgres::PgPoolOptions;
 use futures::StreamExt; // Requis pour les flux de données continus
-use models::utilisateurs::{Utilisateurs, UtilisateursPatch}; // Importer les structures générées
+use models::utilisateurs::Utilisateurs; // Importer la structure générée
 
 #[tokio::main]
 async fn main() -> Result<(), sqlx::Error> {
@@ -156,18 +157,9 @@ async fn main() -> Result<(), sqlx::Error> {
     let utilisateur_id = nouvel_utilisateur.insert(&pool).await?;
     println!("ID de l'utilisateur inséré : {}", utilisateur_id);
 
-    // --- CAS 2 : UPSERT (Insérer, ou mettre à jour en cas de conflit) ---
-    let mut utilisateur_modifie = nouvel_utilisateur.clone();
-    utilisateur_modifie.statut = "banni".into();
-    utilisateur_modifie.upsert(&pool).await?;
-
-    // --- CAS 3 : PATCHING INTELLIGENT (Mise à jour partielle) ---
-    // Mettre à jour *uniquement* le statut. Daox ignorera le champ email.
-    let patch = UtilisateursPatch {
-        statut: Some("inactif".into()),
-        ..Default::default()
-    };
-    Utilisateurs::update_partial_by_pk(&pool, &(utilisateur_id as i64), &patch).await?;
+    // --- CAS 2 : PATCHING INTELLIGENT (Mise à jour partielle) ---
+    // Mettre à jour *uniquement* le statut. Daox génère purement du SQL statique Zéro Allocation.
+    Utilisateurs::update_statut(&pool, &(utilisateur_id as i64), "inactif").await?;
 
     // --- CAS 4 : FLUX SANS ALLOCATION (Streaming) ---
     // Itérer proprement, ligne par ligne, sans déborder la mémoire du système
@@ -209,24 +201,19 @@ Daox comprend précisément votre schéma. En fonction de vos colonnes et de vos
 
 ### Méthodes pilotées par la clé primaire (PK)
 
-- **`get_by_pk(executor, pk)`** ➔ Récupère un enregistrement précis.
-- **`exists_by_pk(executor, pk)`** ➔ Vérification ultra-rapide optimisée par cache sans charger la ligne complète.
-- **`update_by_pk(&self, executor)`** ➔ Écrase complètement l'enregistrement dans la base de données.
-- **`update_partial_by_pk(executor, pk, &Patch)`** ➔ Modification partielle sur les champs définis (économise l'espace de stockage WAL !).
-- **`delete_by_pk(executor, pk)`** ➔ Suppression d'un enregistrement unique.
-- **`delete_many_by_pk(executor, &[pk])`** ➔ Suppression partielle en masse (scalable).
-- **`list_by_cursor(executor, last_id, limit)`** ➔ La sainte **Pagination Keyset en O(1)** (état de l'art) pour les fils d'actualité en défilement infini ("infinite scrolling").
+- **`get_by_{id}(executor, pk)`** ➔ Récupère un enregistrement précis en matchant le nom de la PK (ex: `get_by_email`).
+- **`exists_by_{id}(executor, pk)`** ➔ Vérification ultra-rapide optimisée par cache sans charger la ligne complète.
+- **`update_by_{id}(&self, executor)`** ➔ Écrase complètement l'enregistrement dans la base de données.
+- **`update_{colonne}(executor, pk, val)`** ➔ Patch granulaire pur-SQL pour chaque colonne. (Zéro Allocation).
+- **`delete_by_{id}(executor, pk)`** ➔ Suppression d'un enregistrement unique.
+- **`delete_all(executor)`** ➔ Suppression massive (Truncate) hyper véloce.
 
 ### Méthodes d'index auto-générées
 
 Daox scrute les index de votre BDD et cartographie des méthodes de requête parfaitement optimisées.
 _(Exemple, pour un index sur `email`)_
 
-- **`exists_by_<index>`** ➔ Exemple : **`exists_by_email`**
-- **`get_by_<index>`** ➔ _(Pour les index UNIQUE)_ Exemple : **`get_by_email`**
-- **`list_by_<index>`** ➔ _(Pour les index standard)_ Récupère de multiples correspondances.
-- **`stream_by_<index>`** ➔ Streaming sécurisé des correspondances.
-- **`delete_by_<index>`** ➔ Suppression ciblée et efficace selon un index.
+- **`get_by_{col1_and_col2}`** ➔ Navigue magiquement les index B-Tree, uniques ET composites pour requêter dynamiquement multi-colonnes.
 
 ---
 
