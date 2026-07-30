@@ -6,7 +6,7 @@
 [![Documentation](https://docs.rs/daox/badge.svg)](https://docs.rs/daox)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Daox** est un générateur d'objets d'accès aux données (DAO) "Database-first" hautement optimisé et sans surcoût (zero-overhead) pour Rust.
+**Daox** est un générateur d'objets d'accès aux données (DAO) "Database-first" multi-base, hautement optimisé et sans surcoût (zero-overhead) pour Rust.
 
 En se connectant à votre base de données à la **compilation** (via `build.rs`), Daox introspecte votre base de données existante et génère des structures Rust fortement typées, accompagnées de méthodes CRUD asynchrones extrêmement efficaces.
 
@@ -35,6 +35,7 @@ Voici l'approche **Database-first** (base de données d'abord) visualisée :
 
 - **Patching intelligent :** Envoyez des mises à jour partielles sur le réseau (`update_partial_by_pk`) pour économiser de la bande passante et réduire les écritures disque de la base (WAL).
 - **Conscient du dialecte et sécurisé contre les injections :** Échappe automatiquement les mots-clés SQL réservés et utilise des requêtes préparées pour prévenir de manière stricte les injections SQL.
+- **Support multi-base natif :** Mixez PostgreSQL, MySQL et SQLite en toute sécurité. Les schémas imbriqués (`schema/[base_de_données]/[table]`) émettent automatiquement des objets Rust isolés nommés `BaseDeDonneesTable`, empêchant la moindre collision d'espace de noms tout en retenant la véritable table SQL sous-jacente.
 - **Clés composites :** Support natif complet pour les tables avec des clés primaires multiples.
 
 ---

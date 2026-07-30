@@ -100,7 +100,7 @@ impl RequestContext {
             global_state: self.global_state.clone(),
             rate_limiter: self.rate_limiter.clone(),
             response_cache: self.response_cache.clone(),
-            client_ip: self.client_ip.clone(),
+            client_ip: self.client_ip,
             user_id: self.user_id.clone(),
             headers: self.headers.clone(),
             raw_req: None,

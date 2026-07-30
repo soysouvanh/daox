@@ -28,7 +28,7 @@ chrono = { version = "0.4", features = ["serde"] }
 
 [build-dependencies]
 # daox est utilisé ici pour GÉNÉRER le code pendant le "cargo build"
-daox = { path = "../daox", version = "0.2.0" }
+daox = { path = "../daox", version = "0.2.1" }
 tokio = { version = "1", features = ["full"] }
 # SQLite est initialisé directement dans le build.rs (création du schéma)
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls"] }

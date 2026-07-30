@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 description.workspace = true
-readme.workspace = true
+readme = "README.md"
 license.workspace = true
 repository.workspace = true
 keywords.workspace = true
@@ -21,12 +21,6 @@ sqlite = ["sqlx/sqlite"]
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls"] }
 tokio = { version = "1", features = ["full"] }
 
-# Name conversion (e.g., snake_case -> PascalCase for struct names)
-heck = "0.5"
-
-# Clean error handling with context propagation
-anyhow = "1.0"
+# Minimal dependencies (SOTA)
 toml = "0.8"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-regex = "1.10"

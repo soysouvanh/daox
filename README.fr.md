@@ -6,7 +6,7 @@
 [![Documentation](https://docs.rs/daox/badge.svg)](https://docs.rs/daox)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Daox** est un générateur d'objets d'accès aux données (DAO) "Database-first" hautement optimisé et sans surcoût (zero-overhead) pour Rust.
+**Daox** est un générateur d'objets d'accès aux données (DAO) "Database-first" multi-base, hautement optimisé et sans surcoût (zero-overhead) pour Rust.
 
 Ce dépôt héberge l'ensemble de l'espace de travail (workspace) du code source pour l'écosystème Daox.
 
