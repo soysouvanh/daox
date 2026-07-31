@@ -75,7 +75,7 @@ futures = "0.3"
 
 [build-dependencies]
 # Daox s'exécute à la compilation pour générer votre code DAO
-daox = "0.2.2"
+daox = "0.2.3"
 # Tokio fournit l'environnement d'exécution asynchrone dont Daox a besoin pendant la génération
 tokio = { version = "1", features = ["full"] }
 ```

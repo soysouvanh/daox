@@ -32,7 +32,7 @@ lightx = { path = "../../lightx-workspace/lightx" }
 
 [build-dependencies]
 # daox est utilisé ici pour GÉNÉRER le code pendant le "cargo build"
-daox = { path = "../daox", version = "0.2.2" }
+daox = { path = "../daox", version = "0.2.3" }
 tokio = { version = "1", features = ["full"] }
 # SQLite est initialisé directement dans le build.rs (création du schéma)
 sqlx = { version = "0.9", features = ["sqlite", "runtime-tokio", "tls-rustls"] }
