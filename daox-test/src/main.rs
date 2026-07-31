@@ -175,6 +175,106 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
             .any(|u| u.email == "tx_commit_pg@daox.dev")
     );
 
+    // --- TESTS DES NOUVELLES VUES (COMP_TYPES) ---
+    use models_pg::{
+        CompTypesActiveView, CompTypesMatView, CompTypesMetadata, CompTypesTable, CompTypesView,
+    };
+
+    println!("👁️  TEST DES VUES READ-ONLY (PostgreSQL)");
+
+    ctx.get_or_create_default_tx().await.unwrap();
+    let comp1 = CompTypesTable {
+        id: 0,
+        f_bool: Some(true),
+        f_int: Some(42),
+        f_float: Some(12.5),
+        f_double: Some(12.5),
+        f_decimal: Some("12.50".into()),
+        f_varchar: Some("Test View Rollback".into()),
+        f_text: Some("Text".into()),
+    };
+    let c1_id = comp1.insert(&mut ctx).await.unwrap();
+    CompTypesMetadata {
+        id: 0,
+        comp_types_id: c1_id as i64,
+        f_date: None,
+        f_datetime: None,
+        f_timestamp: None,
+        f_blob: None,
+        f_json: None,
+    }
+    .insert(&mut ctx)
+    .await
+    .unwrap();
+
+    let view_rollback_test = CompTypesView::find_all(&mut ctx, 10, 0).await.unwrap();
+    assert!(
+        view_rollback_test
+            .iter()
+            .any(|v| v.f_varchar.as_deref() == Some("Test View Rollback"))
+    );
+
+    ctx.rollback_default_tx().await.unwrap();
+    let view_after_rollback = CompTypesView::find_all(&mut ctx, 10, 0).await.unwrap();
+    assert!(
+        !view_after_rollback
+            .iter()
+            .any(|v| v.f_varchar.as_deref() == Some("Test View Rollback"))
+    );
+
+    ctx.get_or_create_default_tx().await.unwrap();
+    let comp2 = CompTypesTable {
+        id: 0,
+        f_bool: Some(true),
+        f_int: Some(100),
+        f_float: Some(50.0),
+        f_double: Some(50.0),
+        f_decimal: Some("50.00".into()),
+        f_varchar: Some("Test View Commit".into()),
+        f_text: Some("Text".into()),
+    };
+    let c2_id = comp2.insert(&mut ctx).await.unwrap();
+    CompTypesMetadata {
+        id: 0,
+        comp_types_id: c2_id as i64,
+        f_date: None,
+        f_datetime: None,
+        f_timestamp: None,
+        f_blob: None,
+        f_json: None,
+    }
+    .insert(&mut ctx)
+    .await
+    .unwrap();
+
+    sqlx::query("REFRESH MATERIALIZED VIEW comp_types_mat_view")
+        .execute(&mut **ctx.default_tx.as_mut().unwrap())
+        .await
+        .unwrap();
+
+    ctx.commit_default_tx().await.unwrap();
+
+    let view_data = CompTypesView::find_all(&mut ctx, 10, 0).await.unwrap();
+    assert!(
+        view_data
+            .iter()
+            .any(|v| v.f_varchar.as_deref() == Some("Test View Commit"))
+    );
+    let active_count = CompTypesActiveView::count(&mut ctx).await.unwrap();
+    assert!(active_count >= 1);
+
+    {
+        let mut stream = CompTypesMatView::stream_all(&mut ctx);
+        let mut found = false;
+        while let Some(row) = stream.next().await {
+            let record = row.unwrap();
+            if record.f_varchar.as_deref() == Some("Test View Commit") {
+                found = true;
+            }
+        }
+        assert!(found);
+    }
+
     println!("🎉 TOUS LES TESTS POSTGRESQL ONT RÉUSSI ! Daox est prêt pour la production.");
     Ok(())
 }
@@ -329,6 +429,128 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
             .iter()
             .any(|u| u.email == "tx_commit_mysql@daox.dev")
     );
+
+    // --- TESTS DES NOUVELLES VUES (COMP_TYPES) ---
+    use models_mysql::{
+        CompTypesActiveView, CompTypesMatView, CompTypesMetadata, CompTypesTable, CompTypesView,
+    };
+
+    println!("👁️  TEST DES VUES READ-ONLY (MySQL)");
+
+    // 1. Peupler les tables sources sous Transaction (et rollback test)
+    ctx.get_or_create_default_tx().await.unwrap();
+    let comp1 = CompTypesTable {
+        id: 0,
+        f_bool: Some(1),
+        f_int: Some(42),
+        f_float: Some("12.5".into()),
+        f_double: Some("12.5".into()),
+        f_decimal: Some("12.50".into()),
+        f_varchar: Some("Test View Rollback".into()),
+        f_text: Some("Text".into()),
+    };
+    let c1_id = comp1.insert(&mut ctx).await.unwrap();
+    CompTypesMetadata {
+        id: 0,
+        comp_types_id: c1_id as i64,
+        f_date: None,
+        f_datetime: None,
+        f_timestamp: None,
+        f_blob: None,
+        f_json: None,
+    }
+    .insert(&mut ctx)
+    .await
+    .unwrap();
+
+    let view_rollback_test = CompTypesView::find_all(&mut ctx, 10, 0).await.unwrap();
+    assert!(
+        view_rollback_test
+            .iter()
+            .any(|v| v.f_varchar.as_deref() == Some("Test View Rollback"))
+    );
+
+    // Rollback
+    ctx.rollback_default_tx().await.unwrap();
+
+    // Check after rollback (should not exist)
+    let view_after_rollback = CompTypesView::find_all(&mut ctx, 10, 0).await.unwrap();
+    assert!(
+        !view_after_rollback
+            .iter()
+            .any(|v| v.f_varchar.as_deref() == Some("Test View Rollback"))
+    );
+
+    // 2. Peupler avec Commit
+    ctx.get_or_create_default_tx().await.unwrap();
+    let comp2 = CompTypesTable {
+        id: 0,
+        f_bool: Some(1),
+        f_int: Some(100),
+        f_float: Some("50.0".into()),
+        f_double: Some("50.0".into()),
+        f_decimal: Some("50.00".into()),
+        f_varchar: Some("Test View Commit".into()),
+        f_text: Some("Text".into()),
+    };
+    let c2_id = comp2.insert(&mut ctx).await.unwrap();
+    CompTypesMetadata {
+        id: 0,
+        comp_types_id: c2_id as i64,
+        f_date: None,
+        f_datetime: None,
+        f_timestamp: None,
+        f_blob: None,
+        f_json: None,
+    }
+    .insert(&mut ctx)
+    .await
+    .unwrap();
+
+    // Simulate Materialized View update for MySQL
+    CompTypesMatView {
+        id: c2_id as i64,
+        f_bool: Some(1),
+        f_int: Some(100),
+        f_float: Some("50.0".into()),
+        f_double: Some("50.0".into()),
+        f_decimal: Some("50.00".into()),
+        f_varchar: Some("Test View Commit".into()),
+        f_text: Some("Text".into()),
+        f_date: None,
+        f_datetime: None,
+        f_timestamp: None,
+        f_blob: None,
+        f_json: None,
+    }
+    .insert(&mut ctx)
+    .await
+    .unwrap();
+
+    ctx.commit_default_tx().await.unwrap();
+
+    // 3. Lire les vues hors transaction
+    let view_data = CompTypesView::find_all(&mut ctx, 10, 0).await.unwrap();
+    assert!(
+        view_data
+            .iter()
+            .any(|v| v.f_varchar.as_deref() == Some("Test View Commit"))
+    );
+
+    let active_count = CompTypesActiveView::count(&mut ctx).await.unwrap();
+    assert!(active_count >= 1);
+
+    {
+        let mut stream = CompTypesMatView::stream_all(&mut ctx);
+        let mut found = false;
+        while let Some(row) = stream.next().await {
+            let record = row.unwrap();
+            if record.f_varchar.as_deref() == Some("Test View Commit") {
+                found = true;
+            }
+        }
+        assert!(found);
+    }
 
     println!("🎉 TOUS LES TESTS MYSQL ONT RÉUSSI ! Daox est prêt pour la production.");
     Ok(())
@@ -486,6 +708,121 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
             .iter()
             .any(|u| u.email == "tx_commit_sqlite@daox.dev")
     );
+
+    // --- TESTS DES NOUVELLES VUES (COMP_TYPES) ---
+    use models_sqlite::{
+        CompTypesActiveView, CompTypesMatView, CompTypesMetadata, CompTypesTable, CompTypesView,
+    };
+
+    println!("👁️  TEST DES VUES READ-ONLY (SQLite)");
+
+    ctx.get_or_create_default_tx().await.unwrap();
+    let comp1 = CompTypesTable {
+        id: 0,
+        f_bool: Some(true),
+        f_int: Some(42),
+        f_float: Some(12.5),
+        f_double: Some(12.5),
+        f_decimal: Some("12.50".into()),
+        f_varchar: Some("Test View Rollback".into()),
+        f_text: Some("Text".into()),
+    };
+    let c1_id = comp1.insert(&mut ctx).await.unwrap();
+    CompTypesMetadata {
+        id: 0,
+        comp_types_id: c1_id as i64,
+        f_date: None,
+        f_datetime: None,
+        f_timestamp: None,
+        f_blob: None,
+        f_json: None,
+    }
+    .insert(&mut ctx)
+    .await
+    .unwrap();
+
+    let view_rollback_test = CompTypesView::find_all(&mut ctx, 10, 0).await.unwrap();
+    assert!(
+        view_rollback_test
+            .iter()
+            .any(|v| v.f_varchar.as_deref() == Some("Test View Rollback"))
+    );
+
+    ctx.rollback_default_tx().await.unwrap();
+    let view_after_rollback = CompTypesView::find_all(&mut ctx, 10, 0).await.unwrap();
+    assert!(
+        !view_after_rollback
+            .iter()
+            .any(|v| v.f_varchar.as_deref() == Some("Test View Rollback"))
+    );
+
+    ctx.get_or_create_default_tx().await.unwrap();
+    let comp2 = CompTypesTable {
+        id: 0,
+        f_bool: Some(true),
+        f_int: Some(100),
+        f_float: Some(50.0),
+        f_double: Some(50.0),
+        f_decimal: Some("50.00".into()),
+        f_varchar: Some("Test View Commit".into()),
+        f_text: Some("Text".into()),
+    };
+    let c2_id = comp2.insert(&mut ctx).await.unwrap();
+    CompTypesMetadata {
+        id: 0,
+        comp_types_id: c2_id as i64,
+        f_date: None,
+        f_datetime: None,
+        f_timestamp: None,
+        f_blob: None,
+        f_json: None,
+    }
+    .insert(&mut ctx)
+    .await
+    .unwrap();
+
+    // Simulate Materialized View update for SQLite
+    CompTypesMatView {
+        id: c2_id as i64,
+        f_bool: Some(true),
+        f_int: Some(100),
+        f_float: Some(50.0),
+        f_double: Some(50.0),
+        f_decimal: Some("50.00".into()),
+        f_varchar: Some("Test View Commit".into()),
+        f_text: Some("Text".into()),
+        f_date: None,
+        f_datetime: None,
+        f_timestamp: None,
+        f_blob: None,
+        f_json: None,
+    }
+    .insert(&mut ctx)
+    .await
+    .unwrap();
+
+    ctx.commit_default_tx().await.unwrap();
+
+    let view_data = CompTypesView::find_all(&mut ctx, 10, 0).await.unwrap();
+    assert!(
+        view_data
+            .iter()
+            .any(|v| v.f_varchar.as_deref() == Some("Test View Commit"))
+    );
+    let active_count = CompTypesActiveView::count(&mut ctx).await.unwrap();
+    assert!(active_count >= 1);
+
+    {
+        let mut stream = CompTypesMatView::stream_all(&mut ctx);
+        let mut found = false;
+        while let Some(row) = stream.next().await {
+            let record = row.unwrap();
+            if record.f_varchar.as_deref() == Some("Test View Commit") {
+                found = true;
+            }
+        }
+        assert!(found);
+    }
 
     println!("🎉 TOUS LES TESTS SQLITE ONT RÉUSSI ! Daox est prêt pour la production.");
     Ok(())

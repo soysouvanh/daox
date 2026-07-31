@@ -182,6 +182,751 @@ impl ActiveUsers {
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
+pub struct CompTypesActiveView {
+    pub f_date: Option<chrono::NaiveDate>,
+    pub f_int: Option<i32>,
+    pub f_varchar: Option<String>,
+    pub id: i64,
+}
+
+impl CompTypesActiveView {
+    /// Retrieves a paginated list of records. (Zero-Transaction Overhead for pure reads)
+    pub async fn find_all(ctx: &mut RequestContext, limit: i64, offset: i64) -> Result<Vec<Self>, lightx::core::AppError> {
+        let mut query = sqlx::query_as(r#"SELECT "f_date", "f_int", "f_varchar", "id" FROM "comp_types_active_view" LIMIT $1 OFFSET $2"#);
+        query = query.bind(limit).bind(offset);
+        let records = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_all(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_all(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(records)
+    }
+
+    /// Counts the total number of records in the table.
+    pub async fn count(ctx: &mut RequestContext) -> Result<i64, lightx::core::AppError> {
+        let query = sqlx::query_scalar::<_, i64>(r#"SELECT COUNT(*) FROM "comp_types_active_view""#);
+        let total = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_one(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_one(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(total)
+    }
+
+    /// Returns an asynchronous stream to process millions of records without allocating massive memory.
+    pub fn stream_all<'a>(ctx: &'a mut RequestContext) -> std::pin::Pin<Box<dyn futures::Stream<Item = Result<Self, lightx::core::AppError>> + Send + 'a>> {
+        let query = sqlx::query_as::<_, Self>(r#"SELECT "f_date", "f_int", "f_varchar", "id" FROM "comp_types_active_view""#);
+        use futures::StreamExt;
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            let stream = query.fetch(&mut **tx).map(|res| res.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() }));
+            Box::pin(stream)
+        } else {
+            let stream = query.fetch(&ctx.default_pool).map(|res| res.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() }));
+            Box::pin(stream)
+        }
+    }
+
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct CompTypesMatView {
+    pub f_blob: Option<Vec<u8>>,
+    pub f_bool: Option<bool>,
+    pub f_date: Option<chrono::NaiveDate>,
+    pub f_datetime: Option<chrono::DateTime<chrono::Utc>>,
+    pub f_decimal: Option<String>,
+    pub f_double: Option<f64>,
+    pub f_float: Option<f32>,
+    pub f_int: Option<i32>,
+    pub f_json: Option<String>,
+    pub f_text: Option<String>,
+    pub f_timestamp: Option<chrono::DateTime<chrono::Utc>>,
+    pub f_varchar: Option<String>,
+    pub id: i64,
+}
+
+impl CompTypesMatView {
+    /// Inserts the current record. (Execution uses Pool unless a Transaction is active)
+    pub async fn insert(&self, ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
+        let mut query = sqlx::query(r#"INSERT INTO "comp_types_mat_view" ("f_blob", "f_bool", "f_date", "f_datetime", "f_decimal", "f_double", "f_float", "f_int", "f_json", "f_text", "f_timestamp", "f_varchar", "id") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)"#);
+        query = query.bind(&self.f_blob);
+        query = query.bind(&self.f_bool);
+        query = query.bind(&self.f_date);
+        query = query.bind(&self.f_datetime);
+        query = query.bind(&self.f_decimal);
+        query = query.bind(&self.f_double);
+        query = query.bind(&self.f_float);
+        query = query.bind(&self.f_int);
+        query = query.bind(&self.f_json);
+        query = query.bind(&self.f_text);
+        query = query.bind(&self.f_timestamp);
+        query = query.bind(&self.f_varchar);
+        query = query.bind(&self.id);
+        let _result = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(0) // Postgres table has no auto-increment column to map
+    }
+
+    /// Deletes all records in the table. Returns the number of affected rows.
+    pub async fn delete_all(ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
+        let query = sqlx::query(r#"DELETE FROM "comp_types_mat_view""#);
+        let result = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(result.rows_affected())
+    }
+
+    /// Retrieves a paginated list of records. (Zero-Transaction Overhead for pure reads)
+    pub async fn find_all(ctx: &mut RequestContext, limit: i64, offset: i64) -> Result<Vec<Self>, lightx::core::AppError> {
+        let mut query = sqlx::query_as(r#"SELECT "f_blob", "f_bool", "f_date", "f_datetime", "f_decimal", "f_double", "f_float", "f_int", "f_json", "f_text", "f_timestamp", "f_varchar", "id" FROM "comp_types_mat_view" LIMIT $1 OFFSET $2"#);
+        query = query.bind(limit).bind(offset);
+        let records = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_all(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_all(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(records)
+    }
+
+    /// Counts the total number of records in the table.
+    pub async fn count(ctx: &mut RequestContext) -> Result<i64, lightx::core::AppError> {
+        let query = sqlx::query_scalar::<_, i64>(r#"SELECT COUNT(*) FROM "comp_types_mat_view""#);
+        let total = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_one(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_one(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(total)
+    }
+
+    /// Returns an asynchronous stream to process millions of records without allocating massive memory.
+    pub fn stream_all<'a>(ctx: &'a mut RequestContext) -> std::pin::Pin<Box<dyn futures::Stream<Item = Result<Self, lightx::core::AppError>> + Send + 'a>> {
+        let query = sqlx::query_as::<_, Self>(r#"SELECT "f_blob", "f_bool", "f_date", "f_datetime", "f_decimal", "f_double", "f_float", "f_int", "f_json", "f_text", "f_timestamp", "f_varchar", "id" FROM "comp_types_mat_view""#);
+        use futures::StreamExt;
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            let stream = query.fetch(&mut **tx).map(|res| res.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() }));
+            Box::pin(stream)
+        } else {
+            let stream = query.fetch(&ctx.default_pool).map(|res| res.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() }));
+            Box::pin(stream)
+        }
+    }
+
+    /// Inserts multiple records in a single atomic transaction. (Batch Insert)
+    pub async fn insert_many(items: &[Self], ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
+        ctx.get_or_create_default_tx().await?;
+        let mut count = 0;
+        for item in items {
+            item.insert(ctx).await?;
+            count += 1;
+        }
+        Ok(count)
+    }
+
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct CompTypesMetadata {
+    pub comp_types_id: i64,
+    pub f_blob: Option<Vec<u8>>,
+    pub f_date: Option<chrono::NaiveDate>,
+    pub f_datetime: Option<chrono::DateTime<chrono::Utc>>,
+    pub f_json: Option<String>,
+    pub f_timestamp: Option<chrono::DateTime<chrono::Utc>>,
+    pub id: i64,
+}
+
+impl CompTypesMetadata {
+    /// Inserts the current record. (Execution uses Pool unless a Transaction is active)
+    pub async fn insert(&self, ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
+        let mut query = sqlx::query_scalar::<_, i64>(r#"INSERT INTO "comp_types_metadata" ("comp_types_id", "f_blob", "f_date", "f_datetime", "f_json", "f_timestamp") VALUES ($1, $2, $3, $4, $5, $6) RETURNING "id""#);
+        query = query.bind(&self.comp_types_id);
+        query = query.bind(&self.f_blob);
+        query = query.bind(&self.f_date);
+        query = query.bind(&self.f_datetime);
+        query = query.bind(&self.f_json);
+        query = query.bind(&self.f_timestamp);
+        let result_id = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_one(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_one(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(result_id as u64)
+    }
+
+    /// Upserts the current record (Insert or Update if PK conflicts).
+    pub async fn upsert(&self, ctx: &mut RequestContext) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"INSERT INTO "comp_types_metadata" ("comp_types_id", "f_blob", "f_date", "f_datetime", "f_json", "f_timestamp", "id") VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT ("id") DO UPDATE SET "comp_types_id" = EXCLUDED."comp_types_id", "f_blob" = EXCLUDED."f_blob", "f_date" = EXCLUDED."f_date", "f_datetime" = EXCLUDED."f_datetime", "f_json" = EXCLUDED."f_json", "f_timestamp" = EXCLUDED."f_timestamp""#);
+        query = query.bind(&self.comp_types_id);
+        query = query.bind(&self.f_blob);
+        query = query.bind(&self.f_date);
+        query = query.bind(&self.f_datetime);
+        query = query.bind(&self.f_json);
+        query = query.bind(&self.f_timestamp);
+        query = query.bind(&self.id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    /// Retrieves a record via its primary key. (Zero-Transaction Overhead for pure reads)
+    pub async fn get_by_id(ctx: &mut RequestContext, id: i64) -> Result<Option<Self>, lightx::core::AppError> {
+        let mut query = sqlx::query_as(r#"SELECT "comp_types_id", "f_blob", "f_date", "f_datetime", "f_json", "f_timestamp", "id" FROM "comp_types_metadata" WHERE "id" = $1"#);
+        query = query.bind(&id);
+        let record = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_optional(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_optional(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(record)
+    }
+
+    /// Updates the entire record via its primary key. (Execution uses Pool unless a Transaction is active)
+    pub async fn update_by_id(&self, ctx: &mut RequestContext) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_blob" = $2, "f_date" = $3, "f_datetime" = $4, "f_json" = $5, "f_timestamp" = $6 WHERE "id" = $7"#);
+        query = query.bind(&self.comp_types_id);
+        query = query.bind(&self.f_blob);
+        query = query.bind(&self.f_date);
+        query = query.bind(&self.f_datetime);
+        query = query.bind(&self.f_json);
+        query = query.bind(&self.f_timestamp);
+        query = query.bind(&self.id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    pub async fn update_comp_types_id(ctx: &mut RequestContext, id: i64, new_val: i64) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1 WHERE "id" = $2"#);
+        query = query.bind(&new_val);
+        query = query.bind(&id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    pub async fn update_f_blob(ctx: &mut RequestContext, id: i64, new_val: &[u8]) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"UPDATE "comp_types_metadata" SET "f_blob" = $1 WHERE "id" = $2"#);
+        query = query.bind(new_val);
+        query = query.bind(&id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    pub async fn update_f_date(ctx: &mut RequestContext, id: i64, new_val: chrono::NaiveDate) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"UPDATE "comp_types_metadata" SET "f_date" = $1 WHERE "id" = $2"#);
+        query = query.bind(&new_val);
+        query = query.bind(&id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    pub async fn update_f_datetime(ctx: &mut RequestContext, id: i64, new_val: chrono::DateTime<chrono::Utc>) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"UPDATE "comp_types_metadata" SET "f_datetime" = $1 WHERE "id" = $2"#);
+        query = query.bind(&new_val);
+        query = query.bind(&id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    pub async fn update_f_json(ctx: &mut RequestContext, id: i64, new_val: &str) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"UPDATE "comp_types_metadata" SET "f_json" = $1 WHERE "id" = $2"#);
+        query = query.bind(new_val);
+        query = query.bind(&id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    pub async fn update_f_timestamp(ctx: &mut RequestContext, id: i64, new_val: chrono::DateTime<chrono::Utc>) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"UPDATE "comp_types_metadata" SET "f_timestamp" = $1 WHERE "id" = $2"#);
+        query = query.bind(&new_val);
+        query = query.bind(&id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    /// Permanently deletes the record. (Execution uses Pool unless a Transaction is active)
+    pub async fn delete_by_id(ctx: &mut RequestContext, id: i64) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"DELETE FROM "comp_types_metadata" WHERE "id" = $1"#);
+        query = query.bind(&id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    /// Deletes all records in the table. Returns the number of affected rows.
+    pub async fn delete_all(ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
+        let query = sqlx::query(r#"DELETE FROM "comp_types_metadata""#);
+        let result = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(result.rows_affected())
+    }
+
+    /// Retrieves a paginated list of records. (Zero-Transaction Overhead for pure reads)
+    pub async fn find_all(ctx: &mut RequestContext, limit: i64, offset: i64) -> Result<Vec<Self>, lightx::core::AppError> {
+        let mut query = sqlx::query_as(r#"SELECT "comp_types_id", "f_blob", "f_date", "f_datetime", "f_json", "f_timestamp", "id" FROM "comp_types_metadata" LIMIT $1 OFFSET $2"#);
+        query = query.bind(limit).bind(offset);
+        let records = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_all(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_all(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(records)
+    }
+
+    /// Checks if a record exists by its primary key. (Ultra-fast, doesn't fetch columns)
+    pub async fn exists_by_id(ctx: &mut RequestContext, id: i64) -> Result<bool, lightx::core::AppError> {
+        let mut query = sqlx::query(r#"SELECT 1 FROM "comp_types_metadata" WHERE "id" = $1"#);
+        query = query.bind(&id);
+        let record = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_optional(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_optional(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(record.is_some())
+    }
+
+    /// High-performance O(1) Keyset Pagination based on the Primary Key.
+    pub async fn list_by_id_cursor(ctx: &mut RequestContext, last_id: Option<i64>, limit: i64) -> Result<Vec<Self>, lightx::core::AppError> {
+        let base_query = if last_id.is_some() {
+            r#"SELECT "comp_types_id", "f_blob", "f_date", "f_datetime", "f_json", "f_timestamp", "id" FROM "comp_types_metadata" WHERE "id" > $1 ORDER BY "id" ASC LIMIT $2"#
+        } else {
+            r#"SELECT "comp_types_id", "f_blob", "f_date", "f_datetime", "f_json", "f_timestamp", "id" FROM "comp_types_metadata" ORDER BY "id" ASC LIMIT $1"#
+        };
+        let mut query = sqlx::query_as(base_query);
+        if let Some(last_val) = last_id {
+            query = query.bind(last_val);
+        }
+        query = query.bind(limit);
+        let records = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_all(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_all(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(records)
+    }
+
+    /// Counts the total number of records in the table.
+    pub async fn count(ctx: &mut RequestContext) -> Result<i64, lightx::core::AppError> {
+        let query = sqlx::query_scalar::<_, i64>(r#"SELECT COUNT(*) FROM "comp_types_metadata""#);
+        let total = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_one(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_one(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(total)
+    }
+
+    /// Returns an asynchronous stream to process millions of records without allocating massive memory.
+    pub fn stream_all<'a>(ctx: &'a mut RequestContext) -> std::pin::Pin<Box<dyn futures::Stream<Item = Result<Self, lightx::core::AppError>> + Send + 'a>> {
+        let query = sqlx::query_as::<_, Self>(r#"SELECT "comp_types_id", "f_blob", "f_date", "f_datetime", "f_json", "f_timestamp", "id" FROM "comp_types_metadata""#);
+        use futures::StreamExt;
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            let stream = query.fetch(&mut **tx).map(|res| res.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() }));
+            Box::pin(stream)
+        } else {
+            let stream = query.fetch(&ctx.default_pool).map(|res| res.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() }));
+            Box::pin(stream)
+        }
+    }
+
+    /// Inserts multiple records in a single atomic transaction. (Batch Insert)
+    pub async fn insert_many(items: &[Self], ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
+        ctx.get_or_create_default_tx().await?;
+        let mut count = 0;
+        for item in items {
+            item.insert(ctx).await?;
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    /// Upserts multiple records in a single atomic transaction. (Batch Upsert)
+    pub async fn upsert_many(items: &[Self], ctx: &mut RequestContext) -> Result<(), lightx::core::AppError> {
+        ctx.get_or_create_default_tx().await?;
+        for item in items {
+            item.upsert(ctx).await?;
+        }
+        Ok(())
+    }
+
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct CompTypesTable {
+    pub f_bool: Option<bool>,
+    pub f_decimal: Option<String>,
+    pub f_double: Option<f64>,
+    pub f_float: Option<f32>,
+    pub f_int: Option<i32>,
+    pub f_text: Option<String>,
+    pub f_varchar: Option<String>,
+    pub id: i64,
+}
+
+impl CompTypesTable {
+    /// Inserts the current record. (Execution uses Pool unless a Transaction is active)
+    pub async fn insert(&self, ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
+        let mut query = sqlx::query_scalar::<_, i64>(r#"INSERT INTO "comp_types_table" ("f_bool", "f_decimal", "f_double", "f_float", "f_int", "f_text", "f_varchar") VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING "id""#);
+        query = query.bind(&self.f_bool);
+        query = query.bind(&self.f_decimal);
+        query = query.bind(&self.f_double);
+        query = query.bind(&self.f_float);
+        query = query.bind(&self.f_int);
+        query = query.bind(&self.f_text);
+        query = query.bind(&self.f_varchar);
+        let result_id = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_one(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_one(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(result_id as u64)
+    }
+
+    /// Upserts the current record (Insert or Update if PK conflicts).
+    pub async fn upsert(&self, ctx: &mut RequestContext) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"INSERT INTO "comp_types_table" ("f_bool", "f_decimal", "f_double", "f_float", "f_int", "f_text", "f_varchar", "id") VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT ("id") DO UPDATE SET "f_bool" = EXCLUDED."f_bool", "f_decimal" = EXCLUDED."f_decimal", "f_double" = EXCLUDED."f_double", "f_float" = EXCLUDED."f_float", "f_int" = EXCLUDED."f_int", "f_text" = EXCLUDED."f_text", "f_varchar" = EXCLUDED."f_varchar""#);
+        query = query.bind(&self.f_bool);
+        query = query.bind(&self.f_decimal);
+        query = query.bind(&self.f_double);
+        query = query.bind(&self.f_float);
+        query = query.bind(&self.f_int);
+        query = query.bind(&self.f_text);
+        query = query.bind(&self.f_varchar);
+        query = query.bind(&self.id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    /// Retrieves a record via its primary key. (Zero-Transaction Overhead for pure reads)
+    pub async fn get_by_id(ctx: &mut RequestContext, id: i64) -> Result<Option<Self>, lightx::core::AppError> {
+        let mut query = sqlx::query_as(r#"SELECT "f_bool", "f_decimal", "f_double", "f_float", "f_int", "f_text", "f_varchar", "id" FROM "comp_types_table" WHERE "id" = $1"#);
+        query = query.bind(&id);
+        let record = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_optional(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_optional(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(record)
+    }
+
+    /// Updates the entire record via its primary key. (Execution uses Pool unless a Transaction is active)
+    pub async fn update_by_id(&self, ctx: &mut RequestContext) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_double" = $3, "f_float" = $4, "f_int" = $5, "f_text" = $6, "f_varchar" = $7 WHERE "id" = $8"#);
+        query = query.bind(&self.f_bool);
+        query = query.bind(&self.f_decimal);
+        query = query.bind(&self.f_double);
+        query = query.bind(&self.f_float);
+        query = query.bind(&self.f_int);
+        query = query.bind(&self.f_text);
+        query = query.bind(&self.f_varchar);
+        query = query.bind(&self.id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    pub async fn update_f_bool(ctx: &mut RequestContext, id: i64, new_val: bool) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"UPDATE "comp_types_table" SET "f_bool" = $1 WHERE "id" = $2"#);
+        query = query.bind(&new_val);
+        query = query.bind(&id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    pub async fn update_f_decimal(ctx: &mut RequestContext, id: i64, new_val: &str) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"UPDATE "comp_types_table" SET "f_decimal" = $1 WHERE "id" = $2"#);
+        query = query.bind(new_val);
+        query = query.bind(&id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    pub async fn update_f_double(ctx: &mut RequestContext, id: i64, new_val: f64) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"UPDATE "comp_types_table" SET "f_double" = $1 WHERE "id" = $2"#);
+        query = query.bind(&new_val);
+        query = query.bind(&id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    pub async fn update_f_float(ctx: &mut RequestContext, id: i64, new_val: f32) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"UPDATE "comp_types_table" SET "f_float" = $1 WHERE "id" = $2"#);
+        query = query.bind(&new_val);
+        query = query.bind(&id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    pub async fn update_f_int(ctx: &mut RequestContext, id: i64, new_val: i32) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"UPDATE "comp_types_table" SET "f_int" = $1 WHERE "id" = $2"#);
+        query = query.bind(&new_val);
+        query = query.bind(&id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    pub async fn update_f_text(ctx: &mut RequestContext, id: i64, new_val: &str) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"UPDATE "comp_types_table" SET "f_text" = $1 WHERE "id" = $2"#);
+        query = query.bind(new_val);
+        query = query.bind(&id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    pub async fn update_f_varchar(ctx: &mut RequestContext, id: i64, new_val: &str) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"UPDATE "comp_types_table" SET "f_varchar" = $1 WHERE "id" = $2"#);
+        query = query.bind(new_val);
+        query = query.bind(&id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    /// Permanently deletes the record. (Execution uses Pool unless a Transaction is active)
+    pub async fn delete_by_id(ctx: &mut RequestContext, id: i64) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"DELETE FROM "comp_types_table" WHERE "id" = $1"#);
+        query = query.bind(&id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    /// Deletes all records in the table. Returns the number of affected rows.
+    pub async fn delete_all(ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
+        let query = sqlx::query(r#"DELETE FROM "comp_types_table""#);
+        let result = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(result.rows_affected())
+    }
+
+    /// Retrieves a paginated list of records. (Zero-Transaction Overhead for pure reads)
+    pub async fn find_all(ctx: &mut RequestContext, limit: i64, offset: i64) -> Result<Vec<Self>, lightx::core::AppError> {
+        let mut query = sqlx::query_as(r#"SELECT "f_bool", "f_decimal", "f_double", "f_float", "f_int", "f_text", "f_varchar", "id" FROM "comp_types_table" LIMIT $1 OFFSET $2"#);
+        query = query.bind(limit).bind(offset);
+        let records = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_all(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_all(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(records)
+    }
+
+    /// Checks if a record exists by its primary key. (Ultra-fast, doesn't fetch columns)
+    pub async fn exists_by_id(ctx: &mut RequestContext, id: i64) -> Result<bool, lightx::core::AppError> {
+        let mut query = sqlx::query(r#"SELECT 1 FROM "comp_types_table" WHERE "id" = $1"#);
+        query = query.bind(&id);
+        let record = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_optional(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_optional(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(record.is_some())
+    }
+
+    /// High-performance O(1) Keyset Pagination based on the Primary Key.
+    pub async fn list_by_id_cursor(ctx: &mut RequestContext, last_id: Option<i64>, limit: i64) -> Result<Vec<Self>, lightx::core::AppError> {
+        let base_query = if last_id.is_some() {
+            r#"SELECT "f_bool", "f_decimal", "f_double", "f_float", "f_int", "f_text", "f_varchar", "id" FROM "comp_types_table" WHERE "id" > $1 ORDER BY "id" ASC LIMIT $2"#
+        } else {
+            r#"SELECT "f_bool", "f_decimal", "f_double", "f_float", "f_int", "f_text", "f_varchar", "id" FROM "comp_types_table" ORDER BY "id" ASC LIMIT $1"#
+        };
+        let mut query = sqlx::query_as(base_query);
+        if let Some(last_val) = last_id {
+            query = query.bind(last_val);
+        }
+        query = query.bind(limit);
+        let records = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_all(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_all(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(records)
+    }
+
+    /// Counts the total number of records in the table.
+    pub async fn count(ctx: &mut RequestContext) -> Result<i64, lightx::core::AppError> {
+        let query = sqlx::query_scalar::<_, i64>(r#"SELECT COUNT(*) FROM "comp_types_table""#);
+        let total = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_one(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_one(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(total)
+    }
+
+    /// Returns an asynchronous stream to process millions of records without allocating massive memory.
+    pub fn stream_all<'a>(ctx: &'a mut RequestContext) -> std::pin::Pin<Box<dyn futures::Stream<Item = Result<Self, lightx::core::AppError>> + Send + 'a>> {
+        let query = sqlx::query_as::<_, Self>(r#"SELECT "f_bool", "f_decimal", "f_double", "f_float", "f_int", "f_text", "f_varchar", "id" FROM "comp_types_table""#);
+        use futures::StreamExt;
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            let stream = query.fetch(&mut **tx).map(|res| res.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() }));
+            Box::pin(stream)
+        } else {
+            let stream = query.fetch(&ctx.default_pool).map(|res| res.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() }));
+            Box::pin(stream)
+        }
+    }
+
+    /// Inserts multiple records in a single atomic transaction. (Batch Insert)
+    pub async fn insert_many(items: &[Self], ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
+        ctx.get_or_create_default_tx().await?;
+        let mut count = 0;
+        for item in items {
+            item.insert(ctx).await?;
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    /// Upserts multiple records in a single atomic transaction. (Batch Upsert)
+    pub async fn upsert_many(items: &[Self], ctx: &mut RequestContext) -> Result<(), lightx::core::AppError> {
+        ctx.get_or_create_default_tx().await?;
+        for item in items {
+            item.upsert(ctx).await?;
+        }
+        Ok(())
+    }
+
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct CompTypesView {
+    pub f_blob: Option<Vec<u8>>,
+    pub f_bool: Option<bool>,
+    pub f_date: Option<chrono::NaiveDate>,
+    pub f_datetime: Option<chrono::DateTime<chrono::Utc>>,
+    pub f_decimal: Option<String>,
+    pub f_double: Option<f64>,
+    pub f_float: Option<f32>,
+    pub f_int: Option<i32>,
+    pub f_json: Option<String>,
+    pub f_text: Option<String>,
+    pub f_timestamp: Option<chrono::DateTime<chrono::Utc>>,
+    pub f_varchar: Option<String>,
+    pub id: i64,
+}
+
+impl CompTypesView {
+    /// Retrieves a paginated list of records. (Zero-Transaction Overhead for pure reads)
+    pub async fn find_all(ctx: &mut RequestContext, limit: i64, offset: i64) -> Result<Vec<Self>, lightx::core::AppError> {
+        let mut query = sqlx::query_as(r#"SELECT "f_blob", "f_bool", "f_date", "f_datetime", "f_decimal", "f_double", "f_float", "f_int", "f_json", "f_text", "f_timestamp", "f_varchar", "id" FROM "comp_types_view" LIMIT $1 OFFSET $2"#);
+        query = query.bind(limit).bind(offset);
+        let records = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_all(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_all(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(records)
+    }
+
+    /// Counts the total number of records in the table.
+    pub async fn count(ctx: &mut RequestContext) -> Result<i64, lightx::core::AppError> {
+        let query = sqlx::query_scalar::<_, i64>(r#"SELECT COUNT(*) FROM "comp_types_view""#);
+        let total = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_one(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_one(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(total)
+    }
+
+    /// Returns an asynchronous stream to process millions of records without allocating massive memory.
+    pub fn stream_all<'a>(ctx: &'a mut RequestContext) -> std::pin::Pin<Box<dyn futures::Stream<Item = Result<Self, lightx::core::AppError>> + Send + 'a>> {
+        let query = sqlx::query_as::<_, Self>(r#"SELECT "f_blob", "f_bool", "f_date", "f_datetime", "f_decimal", "f_double", "f_float", "f_int", "f_json", "f_text", "f_timestamp", "f_varchar", "id" FROM "comp_types_view""#);
+        use futures::StreamExt;
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            let stream = query.fetch(&mut **tx).map(|res| res.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() }));
+            Box::pin(stream)
+        } else {
+            let stream = query.fetch(&ctx.default_pool).map(|res| res.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() }));
+            Box::pin(stream)
+        }
+    }
+
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Configurations {
     pub id: i32,
     pub r#match: Option<String>,

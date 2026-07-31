@@ -367,7 +367,7 @@ dependencies = [
 
 [[package]]
 name = "daox"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "serde",
  "sqlx 0.9.0",
@@ -377,7 +377,7 @@ dependencies = [
 
 [[package]]
 name = "daox-test"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "chrono",
  "daox",
@@ -1560,7 +1560,7 @@ checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "plain"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
@@ -2598,7 +2598,7 @@ checksum = "9e1c906769ad99c88eaa54e728060edef082f8e358ff32030cb7c7d315e81109"
 
 [[package]]
 name = "time-macros"
-version = "0.2.32"
+version = "0.2.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e689342a48d2ea927c87ea50cabf8594854bf940e9310208848d680d668ed85"
 dependencies = [
