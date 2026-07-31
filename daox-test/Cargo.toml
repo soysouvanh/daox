@@ -6,11 +6,10 @@ authors.workspace = true
 description = "Integration test suite for the Daox framework."
 license.workspace = true
 repository.workspace = true
-publish = false                                                # Prevent this test suite from being published to crates.io
-
+publish = false
 
 [dependencies]
-# Pour exécuter les requêtes générées par daox
+# Required to execute the generated DAO queries (pure sqlx layer)
 sqlx = { version = "0.9", features = [
     "mysql",
     "postgres",
@@ -20,19 +19,14 @@ sqlx = { version = "0.9", features = [
     "chrono",
 ] }
 tokio = { version = "1", features = ["full"] }
-
-# Pour la fonction de lecture sans allocation (Stream)
+# Required for zero-allocation reading features (Stream)
 futures = "0.3"
-
-# Si la BDD contient des dates
+# Required if the database contains date/time columns
 chrono = { version = "0.4", features = ["serde"] }
 
-# API & SDK mapping
-lightx = { path = "../../lightx-workspace/lightx" }
-
 [build-dependencies]
-# daox est utilisé ici pour GÉNÉRER le code pendant le "cargo build"
-daox = { path = "../daox", version = "0.2.4" }
+# daox is used strictly as a build-dependency to GENERATE code during `cargo build`
+daox = { path = "../daox", version = "0.2.5" }
 tokio = { version = "1", features = ["full"] }
-# SQLite est initialisé directement dans le build.rs (création du schéma)
+# SQLite is specifically initialized at compile-time directly in build.rs
 sqlx = { version = "0.9", features = ["sqlite", "runtime-tokio", "tls-rustls"] }

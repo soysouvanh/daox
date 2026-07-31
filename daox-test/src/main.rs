@@ -25,28 +25,14 @@ async fn main() -> Result<(), sqlx::Error> {
 
 async fn run_postgres() -> Result<(), sqlx::Error> {
     use futures::StreamExt;
-    use models_pg::OrderItems;
-    use models_pg::RequestContext;
-    use models_pg::Users;
+    use models_pg::{OrderItems, Users};
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect("postgres://root:root@localhost:5433/daox_test")
         .await?;
-    let mut ctx = RequestContext {
-        raw_body: lightx::ext::bytes::Bytes::new(),
-        global_state: std::sync::Arc::new(lightx::ext::tokio::sync::broadcast::channel(1).0),
-        rate_limiter: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().build()),
-        response_cache: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().build()),
-        client_ip: "127.0.0.1".parse().unwrap(),
-        user_id: None,
-        headers: lightx::ext::hyper::HeaderMap::new(),
-        raw_req: None,
-        default_pool: pool.clone(),
-        default_tx: None,
-    };
 
-    println!("🐘 DÉMONSTRATION POSTGRESQL");
+    println!("🐘 POSTGRESQL DEMONSTRATION (pure sqlx, zero framework)");
 
     sqlx::query("TRUNCATE TABLE users RESTART IDENTITY CASCADE")
         .execute(&pool)
@@ -55,6 +41,7 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
         .execute(&pool)
         .await?;
 
+    // --- INSERT ---
     let user1 = Users {
         id: 0,
         email: "alice@daox.dev".into(),
@@ -63,25 +50,30 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
         status: "active".into(),
         created_at: None,
     };
-    let user1_id = user1.insert(&mut ctx).await.unwrap();
-    let exists = Users::exists_by_id(&mut ctx, user1_id as i64)
-        .await
-        .unwrap();
+    let user1_id = user1.insert(&pool).await.unwrap();
+
+    // --- EXISTS ---
+    let exists = Users::exists_by_id(&pool, user1_id as i64).await.unwrap();
     assert!(exists);
 
-    // TEST UPSERT
-    let mut user_to_upsert = Users::get_by_id(&mut ctx, user1_id as i64)
+    // --- GET_BY_PK ---
+    let fetched = Users::get_by_id(&pool, user1_id as i64)
         .await
         .unwrap()
         .unwrap();
-    user_to_upsert.status = "banned".into();
-    user_to_upsert.upsert(&mut ctx).await.unwrap();
-    let check_patch = Users::get_by_id(&mut ctx, user1_id as i64)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(check_patch.status, "banned");
+    assert_eq!(fetched.email, "alice@daox.dev");
 
+    // --- UPDATE_BY_PK ---
+    let mut user_to_update = fetched.clone();
+    user_to_update.status = "banned".into();
+    user_to_update.update_by_id(&pool).await.unwrap();
+    let check = Users::get_by_id(&pool, user1_id as i64)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(check.status, "banned");
+
+    // --- INSERT_BATCH ---
     let mut batch_users = Vec::new();
     for i in 1..=50 {
         batch_users.push(Users {
@@ -93,20 +85,25 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
             created_at: None,
         });
     }
-    Users::insert_many(&batch_users, &mut ctx).await.unwrap();
+    Users::insert_batch(&pool, &batch_users).await.unwrap();
 
-    let count = Users::count(&mut ctx).await.unwrap();
+    // --- COUNT ---
+    let count = Users::count(&pool).await.unwrap();
     assert!(count >= 51);
 
-    let all_users = Users::find_all(&mut ctx, 10, 0).await.unwrap();
-    assert_eq!(all_users.len(), 10);
-    let page = Users::list_by_id_cursor(&mut ctx, Some(user1_id as i64), 5)
+    // --- LIST_PAGINATED ---
+    let page = Users::list_paginated(&pool, "id", 1, 10).await.unwrap();
+    assert_eq!(page.len(), 10);
+
+    // --- LIST_BY_CURSOR ---
+    let cursor_page = Users::list_by_cursor(&pool, user1_id as i64, 5)
         .await
         .unwrap();
-    assert!(page.len() <= 5);
+    assert!(cursor_page.len() <= 5);
 
+    // --- STREAM_ALL ---
     {
-        let mut stream = Users::stream_all(&mut ctx);
+        let mut stream = Users::stream_all(&pool);
         let mut stream_count = 0;
         while stream.next().await.is_some() {
             stream_count += 1;
@@ -114,201 +111,91 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
         assert!(stream_count > 0);
     }
 
+    // --- COMPOSITE PK ---
     let mut item = OrderItems {
         order_id: 101,
         product_id: 42,
         quantity: 5,
     };
-    item.insert(&mut ctx).await.unwrap();
+    item.insert(&pool).await.unwrap();
 
-    let deleted_users = Users::delete_all(&mut ctx).await.unwrap();
-    assert!(deleted_users >= 51);
-
-    // TEST UPSERT
+    // --- UPDATE COMPOSITE PK ---
     item.quantity = 15;
-    item.upsert(&mut ctx).await.unwrap();
-    let item_check = OrderItems::get_by_order_id_and_product_id(&mut ctx, 101, 42)
+    item.update_by_order_id_and_product_id(&pool).await.unwrap();
+    let item_check = OrderItems::get_by_order_id_and_product_id(&pool, 101, 42)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(item_check.quantity, 15);
 
-    OrderItems::delete_by_order_id_and_product_id(&mut ctx, 101, 42)
+    // --- DELETE COMPOSITE PK ---
+    OrderItems::delete_by_order_id_and_product_id(&pool, 101, 42)
         .await
         .unwrap();
 
-    // TEST TRANSACTIONS (ROLLBACK)
-    ctx.get_or_create_default_tx().await.unwrap();
-    let user_tx = Users {
-        id: 0,
-        email: "tx_rollback_pg@daox.dev".into(),
-        first_name: Some("Tx".into()),
-        last_name: "Rollback".into(),
-        status: "active".into(),
-        created_at: None,
-    };
-    user_tx.insert(&mut ctx).await.unwrap();
-    ctx.rollback_default_tx().await.unwrap();
-    let all_users_rollback = Users::find_all(&mut ctx, 100, 0).await.unwrap();
-    assert!(
-        !all_users_rollback
-            .iter()
-            .any(|u| u.email == "tx_rollback_pg@daox.dev")
-    );
+    // --- DELETE_MANY_BY_PK ---
+    let ids: Vec<i64> = (1..=10).collect();
+    Users::delete_many_by_id(&pool, &ids).await.unwrap();
 
-    // TEST TRANSACTIONS (COMMIT)
-    ctx.get_or_create_default_tx().await.unwrap();
-    let user_tx2 = Users {
-        id: 0,
-        email: "tx_commit_pg@daox.dev".into(),
-        first_name: Some("Tx".into()),
-        last_name: "Commit".into(),
-        status: "active".into(),
-        created_at: None,
-    };
-    user_tx2.insert(&mut ctx).await.unwrap();
-    ctx.commit_default_tx().await.unwrap();
-    let all_users_commit = Users::find_all(&mut ctx, 100, 0).await.unwrap();
-    assert!(
-        all_users_commit
-            .iter()
-            .any(|u| u.email == "tx_commit_pg@daox.dev")
-    );
-
-    // --- TESTS DES NOUVELLES VUES (COMP_TYPES) ---
-    use models_pg::{
-        CompTypesActiveView, CompTypesMatView, CompTypesMetadata, CompTypesTable, CompTypesView,
-    };
-
-    println!("👁️  TEST DES VUES READ-ONLY (PostgreSQL)");
-
-    ctx.get_or_create_default_tx().await.unwrap();
-    let comp1 = CompTypesTable {
-        id: 0,
-        f_bool: Some(true),
-        f_int: Some(42),
-        f_float: Some(12.5),
-        f_double: Some(12.5),
-        f_decimal: Some("12.50".into()),
-        f_varchar: Some("Test View Rollback".into()),
-        f_text: Some("Text".into()),
-    };
-    let c1_id = comp1.insert(&mut ctx).await.unwrap();
-    CompTypesMetadata {
-        id: 0,
-        comp_types_id: c1_id as i64,
-        f_date: None,
-        f_datetime: None,
-        f_timestamp: None,
-        f_blob: None,
-        f_json: None,
-    }
-    .insert(&mut ctx)
-    .await
-    .unwrap();
-
-    let view_rollback_test = CompTypesView::find_all(&mut ctx, 10, 0).await.unwrap();
-    assert!(
-        view_rollback_test
-            .iter()
-            .any(|v| v.f_varchar.as_deref() == Some("Test View Rollback"))
-    );
-
-    ctx.rollback_default_tx().await.unwrap();
-    let view_after_rollback = CompTypesView::find_all(&mut ctx, 10, 0).await.unwrap();
-    assert!(
-        !view_after_rollback
-            .iter()
-            .any(|v| v.f_varchar.as_deref() == Some("Test View Rollback"))
-    );
-
-    ctx.get_or_create_default_tx().await.unwrap();
-    let comp2 = CompTypesTable {
-        id: 0,
-        f_bool: Some(true),
-        f_int: Some(100),
-        f_float: Some(50.0),
-        f_double: Some(50.0),
-        f_decimal: Some("50.00".into()),
-        f_varchar: Some("Test View Commit".into()),
-        f_text: Some("Text".into()),
-    };
-    let c2_id = comp2.insert(&mut ctx).await.unwrap();
-    CompTypesMetadata {
-        id: 0,
-        comp_types_id: c2_id as i64,
-        f_date: None,
-        f_datetime: None,
-        f_timestamp: None,
-        f_blob: None,
-        f_json: None,
-    }
-    .insert(&mut ctx)
-    .await
-    .unwrap();
-
-    sqlx::query("REFRESH MATERIALIZED VIEW comp_types_mat_view")
-        .execute(&mut **ctx.default_tx.as_mut().unwrap())
-        .await
-        .unwrap();
-
-    ctx.commit_default_tx().await.unwrap();
-
-    let view_data = CompTypesView::find_all(&mut ctx, 10, 0).await.unwrap();
-    assert!(
-        view_data
-            .iter()
-            .any(|v| v.f_varchar.as_deref() == Some("Test View Commit"))
-    );
-    let active_count = CompTypesActiveView::count(&mut ctx).await.unwrap();
-    assert!(active_count >= 1);
-
+    // --- TRANSACTION TEST (ROLLBACK) ---
     {
-        let mut stream = CompTypesMatView::stream_all(&mut ctx);
-        let mut found = false;
-        while let Some(row) = stream.next().await {
-            let record = row.unwrap();
-            if record.f_varchar.as_deref() == Some("Test View Commit") {
-                found = true;
-            }
-        }
-        assert!(found);
+        let mut tx = pool.begin().await?;
+        let user_tx = Users {
+            id: 0,
+            email: "tx_rollback_pg@daox.dev".into(),
+            first_name: Some("Tx".into()),
+            last_name: "Rollback".into(),
+            status: "active".into(),
+            created_at: None,
+        };
+        user_tx.insert(&mut *tx).await.unwrap();
+        tx.rollback().await?;
     }
+    let exists_rollback = Users::exists_by_email(&pool, &"tx_rollback_pg@daox.dev".to_string())
+        .await
+        .unwrap();
+    assert!(!exists_rollback);
 
-    println!("🎉 TOUS LES TESTS POSTGRESQL ONT RÉUSSI ! Daox est prêt pour la production.");
+    // --- TRANSACTION TEST (COMMIT) ---
+    {
+        let mut tx = pool.begin().await?;
+        let user_tx2 = Users {
+            id: 0,
+            email: "tx_commit_pg@daox.dev".into(),
+            first_name: Some("Tx".into()),
+            last_name: "Commit".into(),
+            status: "active".into(),
+            created_at: None,
+        };
+        user_tx2.insert(&mut *tx).await.unwrap();
+        tx.commit().await?;
+    }
+    let exists_commit = Users::exists_by_email(&pool, &"tx_commit_pg@daox.dev".to_string())
+        .await
+        .unwrap();
+    assert!(exists_commit);
+
+    println!("🎉 ALL POSTGRESQL TESTS PASSED! Daox is production-ready.");
     Ok(())
 }
 
 async fn run_mysql() -> Result<(), sqlx::Error> {
     use futures::StreamExt;
-    use models_mysql::OrderItems;
-    use models_mysql::RequestContext;
-    use models_mysql::Users;
+    use models_mysql::{OrderItems, Users};
 
     let pool = MySqlPoolOptions::new()
         .max_connections(5)
         .connect("mysql://root:root@localhost:3307/daox_test")
         .await?;
-    let mut ctx = RequestContext {
-        raw_body: lightx::ext::bytes::Bytes::new(),
-        global_state: std::sync::Arc::new(lightx::ext::tokio::sync::broadcast::channel(1).0),
-        rate_limiter: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().build()),
-        response_cache: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().build()),
-        client_ip: "127.0.0.1".parse().unwrap(),
-        user_id: None,
-        headers: lightx::ext::hyper::HeaderMap::new(),
-        raw_req: None,
-        default_pool: pool.clone(),
-        default_tx: None,
-    };
 
-    println!("🐬 DEMONSTRATION MYSQL/MARIADB");
+    println!("🐬 MYSQL/MARIADB DEMONSTRATION (pure sqlx, zero framework)");
 
     sqlx::query("TRUNCATE TABLE users").execute(&pool).await?;
     sqlx::query("TRUNCATE TABLE order_items")
         .execute(&pool)
         .await?;
 
+    // --- INSERT ---
     let user1 = Users {
         id: 0,
         email: "bob@daox.dev".into(),
@@ -317,25 +204,30 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
         status: "active".into(),
         created_at: None,
     };
-    let user1_id = user1.insert(&mut ctx).await.unwrap();
-    let exists = Users::exists_by_id(&mut ctx, user1_id as i64)
-        .await
-        .unwrap();
+    let user1_id = user1.insert(&pool).await.unwrap();
+
+    // --- EXISTS ---
+    let exists = Users::exists_by_id(&pool, user1_id as i64).await.unwrap();
     assert!(exists);
 
-    // TEST UPSERT
-    let mut user_to_upsert = Users::get_by_id(&mut ctx, user1_id as i64)
+    // --- GET_BY_PK ---
+    let fetched = Users::get_by_id(&pool, user1_id as i64)
         .await
         .unwrap()
         .unwrap();
-    user_to_upsert.status = "banned".into();
-    user_to_upsert.upsert(&mut ctx).await.unwrap();
-    let check_patch = Users::get_by_id(&mut ctx, user1_id as i64)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(check_patch.status, "banned");
+    assert_eq!(fetched.email, "bob@daox.dev");
 
+    // --- UPDATE_BY_PK ---
+    let mut user_to_update = fetched.clone();
+    user_to_update.status = "banned".into();
+    user_to_update.update_by_id(&pool).await.unwrap();
+    let check = Users::get_by_id(&pool, user1_id as i64)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(check.status, "banned");
+
+    // --- INSERT_BATCH ---
     let mut batch_users = Vec::new();
     for i in 1..=50 {
         batch_users.push(Users {
@@ -347,21 +239,25 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
             created_at: None,
         });
     }
-    Users::insert_many(&batch_users, &mut ctx).await.unwrap();
+    Users::insert_batch(&pool, &batch_users).await.unwrap();
 
-    let count = Users::count(&mut ctx).await.unwrap();
+    // --- COUNT ---
+    let count = Users::count(&pool).await.unwrap();
     assert!(count >= 51);
 
-    let all_users = Users::find_all(&mut ctx, 10, 0).await.unwrap();
-    assert_eq!(all_users.len(), 10);
+    // --- LIST_PAGINATED ---
+    let page = Users::list_paginated(&pool, "id", 1, 10).await.unwrap();
+    assert_eq!(page.len(), 10);
 
-    let page = Users::list_by_id_cursor(&mut ctx, Some(user1_id as i64), 5)
+    // --- LIST_BY_CURSOR ---
+    let cursor_page = Users::list_by_cursor(&pool, user1_id as i64, 5)
         .await
         .unwrap();
-    assert!(page.len() <= 5);
+    assert!(cursor_page.len() <= 5);
 
+    // --- STREAM_ALL ---
     {
-        let mut stream = Users::stream_all(&mut ctx);
+        let mut stream = Users::stream_all(&pool);
         let mut stream_count = 0;
         while stream.next().await.is_some() {
             stream_count += 1;
@@ -369,225 +265,88 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
         assert!(stream_count > 0);
     }
 
+    // --- COMPOSITE PK ---
     let mut item = OrderItems {
         order_id: 200,
         product_id: 99,
         quantity: 2,
     };
-    item.insert(&mut ctx).await.unwrap();
+    item.insert(&pool).await.unwrap();
 
-    let deleted_users = Users::delete_all(&mut ctx).await.unwrap();
-    assert!(deleted_users >= 51);
-
-    // TEST UPSERT
+    // --- UPDATE COMPOSITE PK ---
     item.quantity = 25;
-    item.upsert(&mut ctx).await.unwrap();
-    let item_check = OrderItems::get_by_order_id_and_product_id(&mut ctx, 200, 99)
+    item.update_by_order_id_and_product_id(&pool).await.unwrap();
+    let item_check = OrderItems::get_by_order_id_and_product_id(&pool, 200, 99)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(item_check.quantity, 25);
 
-    OrderItems::delete_by_order_id_and_product_id(&mut ctx, 200, 99)
+    // --- DELETE COMPOSITE PK ---
+    OrderItems::delete_by_order_id_and_product_id(&pool, 200, 99)
         .await
         .unwrap();
 
-    // TEST TRANSACTIONS (ROLLBACK)
-    ctx.get_or_create_default_tx().await.unwrap();
-    let user_tx = Users {
-        id: 0,
-        email: "tx_rollback_mysql@daox.dev".into(),
-        first_name: Some("Tx".into()),
-        last_name: "Rollback".into(),
-        status: "active".into(),
-        created_at: None,
-    };
-    user_tx.insert(&mut ctx).await.unwrap();
-    ctx.rollback_default_tx().await.unwrap();
-    let all_users_rollback = Users::find_all(&mut ctx, 100, 0).await.unwrap();
-    assert!(
-        !all_users_rollback
-            .iter()
-            .any(|u| u.email == "tx_rollback_mysql@daox.dev")
-    );
-
-    // TEST TRANSACTIONS (COMMIT)
-    ctx.get_or_create_default_tx().await.unwrap();
-    let user_tx2 = Users {
-        id: 0,
-        email: "tx_commit_mysql@daox.dev".into(),
-        first_name: Some("Tx".into()),
-        last_name: "Commit".into(),
-        status: "active".into(),
-        created_at: None,
-    };
-    user_tx2.insert(&mut ctx).await.unwrap();
-    ctx.commit_default_tx().await.unwrap();
-    let all_users_commit = Users::find_all(&mut ctx, 100, 0).await.unwrap();
-    assert!(
-        all_users_commit
-            .iter()
-            .any(|u| u.email == "tx_commit_mysql@daox.dev")
-    );
-
-    // --- TESTS DES NOUVELLES VUES (COMP_TYPES) ---
-    use models_mysql::{
-        CompTypesActiveView, CompTypesMatView, CompTypesMetadata, CompTypesTable, CompTypesView,
-    };
-
-    println!("👁️  TEST DES VUES READ-ONLY (MySQL)");
-
-    // 1. Peupler les tables sources sous Transaction (et rollback test)
-    ctx.get_or_create_default_tx().await.unwrap();
-    let comp1 = CompTypesTable {
-        id: 0,
-        f_bool: Some(1),
-        f_int: Some(42),
-        f_float: Some("12.5".into()),
-        f_double: Some("12.5".into()),
-        f_decimal: Some("12.50".into()),
-        f_varchar: Some("Test View Rollback".into()),
-        f_text: Some("Text".into()),
-    };
-    let c1_id = comp1.insert(&mut ctx).await.unwrap();
-    CompTypesMetadata {
-        id: 0,
-        comp_types_id: c1_id as i64,
-        f_date: None,
-        f_datetime: None,
-        f_timestamp: None,
-        f_blob: None,
-        f_json: None,
-    }
-    .insert(&mut ctx)
-    .await
-    .unwrap();
-
-    let view_rollback_test = CompTypesView::find_all(&mut ctx, 10, 0).await.unwrap();
-    assert!(
-        view_rollback_test
-            .iter()
-            .any(|v| v.f_varchar.as_deref() == Some("Test View Rollback"))
-    );
-
-    // Rollback
-    ctx.rollback_default_tx().await.unwrap();
-
-    // Check after rollback (should not exist)
-    let view_after_rollback = CompTypesView::find_all(&mut ctx, 10, 0).await.unwrap();
-    assert!(
-        !view_after_rollback
-            .iter()
-            .any(|v| v.f_varchar.as_deref() == Some("Test View Rollback"))
-    );
-
-    // 2. Peupler avec Commit
-    ctx.get_or_create_default_tx().await.unwrap();
-    let comp2 = CompTypesTable {
-        id: 0,
-        f_bool: Some(1),
-        f_int: Some(100),
-        f_float: Some("50.0".into()),
-        f_double: Some("50.0".into()),
-        f_decimal: Some("50.00".into()),
-        f_varchar: Some("Test View Commit".into()),
-        f_text: Some("Text".into()),
-    };
-    let c2_id = comp2.insert(&mut ctx).await.unwrap();
-    CompTypesMetadata {
-        id: 0,
-        comp_types_id: c2_id as i64,
-        f_date: None,
-        f_datetime: None,
-        f_timestamp: None,
-        f_blob: None,
-        f_json: None,
-    }
-    .insert(&mut ctx)
-    .await
-    .unwrap();
-
-    // Simulate Materialized View update for MySQL
-    CompTypesMatView {
-        id: c2_id as i64,
-        f_bool: Some(1),
-        f_int: Some(100),
-        f_float: Some("50.0".into()),
-        f_double: Some("50.0".into()),
-        f_decimal: Some("50.00".into()),
-        f_varchar: Some("Test View Commit".into()),
-        f_text: Some("Text".into()),
-        f_date: None,
-        f_datetime: None,
-        f_timestamp: None,
-        f_blob: None,
-        f_json: None,
-    }
-    .insert(&mut ctx)
-    .await
-    .unwrap();
-
-    ctx.commit_default_tx().await.unwrap();
-
-    // 3. Lire les vues hors transaction
-    let view_data = CompTypesView::find_all(&mut ctx, 10, 0).await.unwrap();
-    assert!(
-        view_data
-            .iter()
-            .any(|v| v.f_varchar.as_deref() == Some("Test View Commit"))
-    );
-
-    let active_count = CompTypesActiveView::count(&mut ctx).await.unwrap();
-    assert!(active_count >= 1);
-
+    // --- TRANSACTION TEST (ROLLBACK) ---
     {
-        let mut stream = CompTypesMatView::stream_all(&mut ctx);
-        let mut found = false;
-        while let Some(row) = stream.next().await {
-            let record = row.unwrap();
-            if record.f_varchar.as_deref() == Some("Test View Commit") {
-                found = true;
-            }
-        }
-        assert!(found);
+        let mut tx = pool.begin().await?;
+        let user_tx = Users {
+            id: 0,
+            email: "tx_rollback_mysql@daox.dev".into(),
+            first_name: Some("Tx".into()),
+            last_name: "Rollback".into(),
+            status: "active".into(),
+            created_at: None,
+        };
+        user_tx.insert(&mut *tx).await.unwrap();
+        tx.rollback().await?;
     }
+    let exists_rollback = Users::exists_by_email(&pool, &"tx_rollback_mysql@daox.dev".to_string())
+        .await
+        .unwrap();
+    assert!(!exists_rollback);
 
-    println!("🎉 TOUS LES TESTS MYSQL ONT RÉUSSI ! Daox est prêt pour la production.");
+    // --- TRANSACTION TEST (COMMIT) ---
+    {
+        let mut tx = pool.begin().await?;
+        let user_tx2 = Users {
+            id: 0,
+            email: "tx_commit_mysql@daox.dev".into(),
+            first_name: Some("Tx".into()),
+            last_name: "Commit".into(),
+            status: "active".into(),
+            created_at: None,
+        };
+        user_tx2.insert(&mut *tx).await.unwrap();
+        tx.commit().await?;
+    }
+    let exists_commit = Users::exists_by_email(&pool, &"tx_commit_mysql@daox.dev".to_string())
+        .await
+        .unwrap();
+    assert!(exists_commit);
+
+    println!("🎉 ALL MYSQL TESTS PASSED! Daox is production-ready.");
     Ok(())
 }
 
 async fn run_sqlite() -> Result<(), sqlx::Error> {
     use futures::StreamExt;
-    use models_sqlite::OrderItems;
-    use models_sqlite::Users;
-    // Note: RequestContext for sqlite needs a SqlitePool!
-    use models_sqlite::RequestContext;
+    use models_sqlite::{OrderItems, Users};
 
     let sqlite_db_path = format!("{}/daox_test.sqlite", env!("OUT_DIR"));
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
         .connect(&format!("sqlite://{}", sqlite_db_path))
         .await?;
-    let mut ctx = RequestContext {
-        raw_body: lightx::ext::bytes::Bytes::new(),
-        global_state: std::sync::Arc::new(lightx::ext::tokio::sync::broadcast::channel(1).0),
-        rate_limiter: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().build()),
-        response_cache: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().build()),
-        client_ip: "127.0.0.1".parse().unwrap(),
-        user_id: None,
-        headers: lightx::ext::hyper::HeaderMap::new(),
-        raw_req: None,
-        default_pool: pool.clone(),
-        default_tx: None,
-    };
 
-    println!("🪶 DEMONSTRATION SQLITE");
+    println!("🪶 SQLITE DEMONSTRATION (pure sqlx, zero framework)");
 
     sqlx::query("DELETE FROM users").execute(&pool).await?;
     sqlx::query("DELETE FROM order_items")
         .execute(&pool)
         .await?;
 
+    // --- INSERT ---
     let user1 = Users {
         id: 0,
         email: "alice@sqlite.dev".into(),
@@ -596,25 +355,30 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
         status: "active".into(),
         created_at: None,
     };
-    let user1_id = user1.insert(&mut ctx).await.unwrap();
-    let exists = Users::exists_by_id(&mut ctx, user1_id as i64)
-        .await
-        .unwrap();
+    let user1_id = user1.insert(&pool).await.unwrap();
+
+    // --- EXISTS ---
+    let exists = Users::exists_by_id(&pool, user1_id as i64).await.unwrap();
     assert!(exists);
 
-    // TEST UPSERT
-    let mut user_to_upsert = Users::get_by_id(&mut ctx, user1_id as i64)
+    // --- GET_BY_PK ---
+    let fetched = Users::get_by_id(&pool, user1_id as i64)
         .await
         .unwrap()
         .unwrap();
-    user_to_upsert.status = "inactive".into();
-    user_to_upsert.upsert(&mut ctx).await.unwrap();
-    let check_patch = Users::get_by_id(&mut ctx, user1_id as i64)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(check_patch.status, "inactive");
+    assert_eq!(fetched.email, "alice@sqlite.dev");
 
+    // --- UPDATE_BY_PK ---
+    let mut user_to_update = fetched.clone();
+    user_to_update.status = "inactive".into();
+    user_to_update.update_by_id(&pool).await.unwrap();
+    let check = Users::get_by_id(&pool, user1_id as i64)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(check.status, "inactive");
+
+    // --- INSERT_BATCH ---
     let mut batch_users = Vec::new();
     for i in 1..=50 {
         batch_users.push(Users {
@@ -626,21 +390,25 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
             created_at: None,
         });
     }
-    Users::insert_many(&batch_users, &mut ctx).await.unwrap();
+    Users::insert_batch(&pool, &batch_users).await.unwrap();
 
-    let count = Users::count(&mut ctx).await.unwrap();
+    // --- COUNT ---
+    let count = Users::count(&pool).await.unwrap();
     assert!(count >= 51);
 
-    let all_users = Users::find_all(&mut ctx, 10, 0).await.unwrap();
-    assert_eq!(all_users.len(), 10);
+    // --- LIST_PAGINATED ---
+    let page = Users::list_paginated(&pool, "id", 1, 10).await.unwrap();
+    assert_eq!(page.len(), 10);
 
-    let page = Users::list_by_id_cursor(&mut ctx, Some(user1_id as i64), 5)
+    // --- LIST_BY_CURSOR ---
+    let cursor_page = Users::list_by_cursor(&pool, user1_id as i64, 5)
         .await
         .unwrap();
-    assert!(page.len() <= 5);
+    assert!(cursor_page.len() <= 5);
 
+    // --- STREAM_ALL ---
     {
-        let mut stream = Users::stream_all(&mut ctx);
+        let mut stream = Users::stream_all(&pool);
         let mut stream_count = 0;
         while stream.next().await.is_some() {
             stream_count += 1;
@@ -648,182 +416,66 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
         assert!(stream_count > 0);
     }
 
+    // --- COMPOSITE PK ---
     let mut item = OrderItems {
         order_id: 300,
         product_id: 99,
         quantity: 2,
     };
-    item.insert(&mut ctx).await.unwrap();
+    item.insert(&pool).await.unwrap();
 
-    let deleted_users = Users::delete_all(&mut ctx).await.unwrap();
-    assert!(deleted_users >= 51);
-
-    // TEST UPSERT
+    // --- UPDATE COMPOSITE PK ---
     item.quantity = 35;
-    item.upsert(&mut ctx).await.unwrap();
-    let item_check = OrderItems::get_by_order_id_and_product_id(&mut ctx, 300, 99)
+    item.update_by_order_id_and_product_id(&pool).await.unwrap();
+    let item_check = OrderItems::get_by_order_id_and_product_id(&pool, 300, 99)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(item_check.quantity, 35);
 
-    OrderItems::delete_by_order_id_and_product_id(&mut ctx, 300, 99)
+    // --- DELETE COMPOSITE PK ---
+    OrderItems::delete_by_order_id_and_product_id(&pool, 300, 99)
         .await
         .unwrap();
 
-    // TEST TRANSACTIONS (ROLLBACK)
-    ctx.get_or_create_default_tx().await.unwrap();
-    let user_tx = Users {
-        id: 0,
-        email: "tx_rollback_sqlite@daox.dev".into(),
-        first_name: Some("Tx".into()),
-        last_name: "Rollback".into(),
-        status: "active".into(),
-        created_at: None,
-    };
-    user_tx.insert(&mut ctx).await.unwrap();
-    ctx.rollback_default_tx().await.unwrap();
-    let all_users_rollback = Users::find_all(&mut ctx, 100, 0).await.unwrap();
-    assert!(
-        !all_users_rollback
-            .iter()
-            .any(|u| u.email == "tx_rollback_sqlite@daox.dev")
-    );
-
-    // TEST TRANSACTIONS (COMMIT)
-    ctx.get_or_create_default_tx().await.unwrap();
-    let user_tx2 = Users {
-        id: 0,
-        email: "tx_commit_sqlite@daox.dev".into(),
-        first_name: Some("Tx".into()),
-        last_name: "Commit".into(),
-        status: "active".into(),
-        created_at: None,
-    };
-    user_tx2.insert(&mut ctx).await.unwrap();
-    ctx.commit_default_tx().await.unwrap();
-    let all_users_commit = Users::find_all(&mut ctx, 100, 0).await.unwrap();
-    assert!(
-        all_users_commit
-            .iter()
-            .any(|u| u.email == "tx_commit_sqlite@daox.dev")
-    );
-
-    // --- TESTS DES NOUVELLES VUES (COMP_TYPES) ---
-    use models_sqlite::{
-        CompTypesActiveView, CompTypesMatView, CompTypesMetadata, CompTypesTable, CompTypesView,
-    };
-
-    println!("👁️  TEST DES VUES READ-ONLY (SQLite)");
-
-    ctx.get_or_create_default_tx().await.unwrap();
-    let comp1 = CompTypesTable {
-        id: 0,
-        f_bool: Some(true),
-        f_int: Some(42),
-        f_float: Some(12.5),
-        f_double: Some(12.5),
-        f_decimal: Some("12.50".into()),
-        f_varchar: Some("Test View Rollback".into()),
-        f_text: Some("Text".into()),
-    };
-    let c1_id = comp1.insert(&mut ctx).await.unwrap();
-    CompTypesMetadata {
-        id: 0,
-        comp_types_id: c1_id as i64,
-        f_date: None,
-        f_datetime: None,
-        f_timestamp: None,
-        f_blob: None,
-        f_json: None,
-    }
-    .insert(&mut ctx)
-    .await
-    .unwrap();
-
-    let view_rollback_test = CompTypesView::find_all(&mut ctx, 10, 0).await.unwrap();
-    assert!(
-        view_rollback_test
-            .iter()
-            .any(|v| v.f_varchar.as_deref() == Some("Test View Rollback"))
-    );
-
-    ctx.rollback_default_tx().await.unwrap();
-    let view_after_rollback = CompTypesView::find_all(&mut ctx, 10, 0).await.unwrap();
-    assert!(
-        !view_after_rollback
-            .iter()
-            .any(|v| v.f_varchar.as_deref() == Some("Test View Rollback"))
-    );
-
-    ctx.get_or_create_default_tx().await.unwrap();
-    let comp2 = CompTypesTable {
-        id: 0,
-        f_bool: Some(true),
-        f_int: Some(100),
-        f_float: Some(50.0),
-        f_double: Some(50.0),
-        f_decimal: Some("50.00".into()),
-        f_varchar: Some("Test View Commit".into()),
-        f_text: Some("Text".into()),
-    };
-    let c2_id = comp2.insert(&mut ctx).await.unwrap();
-    CompTypesMetadata {
-        id: 0,
-        comp_types_id: c2_id as i64,
-        f_date: None,
-        f_datetime: None,
-        f_timestamp: None,
-        f_blob: None,
-        f_json: None,
-    }
-    .insert(&mut ctx)
-    .await
-    .unwrap();
-
-    // Simulate Materialized View update for SQLite
-    CompTypesMatView {
-        id: c2_id as i64,
-        f_bool: Some(true),
-        f_int: Some(100),
-        f_float: Some(50.0),
-        f_double: Some(50.0),
-        f_decimal: Some("50.00".into()),
-        f_varchar: Some("Test View Commit".into()),
-        f_text: Some("Text".into()),
-        f_date: None,
-        f_datetime: None,
-        f_timestamp: None,
-        f_blob: None,
-        f_json: None,
-    }
-    .insert(&mut ctx)
-    .await
-    .unwrap();
-
-    ctx.commit_default_tx().await.unwrap();
-
-    let view_data = CompTypesView::find_all(&mut ctx, 10, 0).await.unwrap();
-    assert!(
-        view_data
-            .iter()
-            .any(|v| v.f_varchar.as_deref() == Some("Test View Commit"))
-    );
-    let active_count = CompTypesActiveView::count(&mut ctx).await.unwrap();
-    assert!(active_count >= 1);
-
+    // --- TRANSACTION TEST (ROLLBACK) ---
     {
-        let mut stream = CompTypesMatView::stream_all(&mut ctx);
-        let mut found = false;
-        while let Some(row) = stream.next().await {
-            let record = row.unwrap();
-            if record.f_varchar.as_deref() == Some("Test View Commit") {
-                found = true;
-            }
-        }
-        assert!(found);
+        let mut tx = pool.begin().await?;
+        let user_tx = Users {
+            id: 0,
+            email: "tx_rollback_sqlite@daox.dev".into(),
+            first_name: Some("Tx".into()),
+            last_name: "Rollback".into(),
+            status: "active".into(),
+            created_at: None,
+        };
+        user_tx.insert(&mut *tx).await.unwrap();
+        tx.rollback().await?;
     }
+    let exists_rollback = Users::exists_by_email(&pool, &"tx_rollback_sqlite@daox.dev".to_string())
+        .await
+        .unwrap();
+    assert!(!exists_rollback);
 
-    println!("🎉 TOUS LES TESTS SQLITE ONT RÉUSSI ! Daox est prêt pour la production.");
+    // --- TRANSACTION TEST (COMMIT) ---
+    {
+        let mut tx = pool.begin().await?;
+        let user_tx2 = Users {
+            id: 0,
+            email: "tx_commit_sqlite@daox.dev".into(),
+            first_name: Some("Tx".into()),
+            last_name: "Commit".into(),
+            status: "active".into(),
+            created_at: None,
+        };
+        user_tx2.insert(&mut *tx).await.unwrap();
+        tx.commit().await?;
+    }
+    let exists_commit = Users::exists_by_email(&pool, &"tx_commit_sqlite@daox.dev".to_string())
+        .await
+        .unwrap();
+    assert!(exists_commit);
+
+    println!("🎉 ALL SQLITE TESTS PASSED! Daox is production-ready.");
     Ok(())
 }

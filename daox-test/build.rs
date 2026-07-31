@@ -4,22 +4,19 @@ use std::path::Path;
 #[tokio::main]
 async fn main() {
     // Tell Cargo to re-run this build script ONLY if `build.rs` itself changes.
-    // This prevents unnecessary infinite loops during compilation.
     println!("cargo:rerun-if-changed=build.rs");
 
-    // Tell Cargo to also re-run this script if the core generator (`daox`) source code changes.
-    // This ensures that our generated models are always up to date with the latest generator logic.
+    // Re-run if the core generator (`daox`) source code changes.
     println!("cargo:rerun-if-changed=../daox/src");
 
-    // Database connection URLs (these databases are currently running via Docker Compose).
-    // The generator needs active connections to introspect the schemas.
+    // Database connection URLs (running via Docker Compose).
     let mysql_url = "mysql://root:root@localhost:3307/daox_test";
     let pg_url = "postgres://root:root@localhost:5433/daox_test";
 
     let mysql_out = "src/models_mysql";
     let pg_out = "src/models_pg";
 
-    // Ensure the output directories exist before we attempt to write files into them.
+    // Ensure output directories exist.
     if !Path::new(mysql_out).exists() {
         fs::create_dir_all(mysql_out).unwrap();
     }
@@ -27,15 +24,14 @@ async fn main() {
         fs::create_dir_all(pg_out).unwrap();
     }
 
-    // Instantiate and run the Daox Generator for MySQL.
-    // This connects to the DB, parses the schema, and creates `users.rs`, `order_items.rs`, etc.
+    // Generate MySQL DAOs (pure sqlx, zero framework dependency).
     let generator_mysql = daox::DaoxGenerator::new(mysql_url, mysql_out);
     generator_mysql
         .generate()
         .await
         .expect("Failed to generate MySQL DAOs");
 
-    // Repeat the process for PostgreSQL to generate the Postgres-specific syntax models.
+    // Generate PostgreSQL DAOs.
     let generator_pg = daox::DaoxGenerator::new(pg_url, pg_out);
     generator_pg
         .generate()
@@ -43,9 +39,6 @@ async fn main() {
         .expect("Failed to generate Postgres DAOs");
 
     // --- SPECIAL HANDLING FOR SQLITE ---
-    // Unlike MySQL/PG which run in Docker, SQLite is a local file.
-    // We must physically create the file and initialize its schema right here in the build script.
-
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let sqlite_db_path = format!("{}/daox_test.sqlite", out_dir);
     if !Path::new(&sqlite_db_path).exists() {
@@ -58,7 +51,7 @@ async fn main() {
         .await
         .unwrap();
 
-    // Read the init SQL file and execute each query separated by `;` to build the tables.
+    // Initialize SQLite schema.
     let sqlite_schema: &'static str = include_str!("../init_sqlite.sql");
     for query in sqlite_schema.split(";") {
         let q = query.trim();
@@ -72,7 +65,7 @@ async fn main() {
         fs::create_dir_all(sqlite_out).unwrap();
     }
 
-    // Now that the SQLite database is ready and hydrated with tables, generate its DAOs.
+    // Generate SQLite DAOs.
     let generator_sqlite = daox::DaoxGenerator::new(&sqlite_url, sqlite_out);
     generator_sqlite
         .generate()

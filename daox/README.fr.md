@@ -1,88 +1,84 @@
 [English](README.md) | [Français](README.fr.md)
 
-# Daox
+# Daox : L'outil de base de données ultime pour Rust
 
 [![Crates.io](https://img.shields.io/crates/v/daox.svg)](https://crates.io/crates/daox)
 [![Documentation](https://docs.rs/daox/badge.svg)](https://docs.rs/daox)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Daox** est un générateur d'objets d'accès aux données (DAO) "Database-first" multi-base, hautement optimisé et sans surcoût (zero-overhead) pour Rust.
+Bienvenue sur **Daox** ! Si vous débutez en programmation ou avec Rust, vous êtes exactement au bon endroit.
 
-En se connectant à votre base de données à la **compilation** (via `build.rs`), Daox introspecte votre base de données existante et génère des structures Rust fortement typées, accompagnées de méthodes CRUD asynchrones extrêmement efficaces.
+**Daox** est un outil hautement optimisé qui relie automatiquement votre application Rust à votre base de données.
+
+Au lieu que vous écriviez du code répétitif et complexe pour communiquer avec votre base de données, Daox s'y connecte **au moment de la compilation**, analyse vos tables et **écrit le code exact dont vous avez besoin à votre place**. Le résultat est une application incroyablement rapide et sans risque d'erreur humaine.
 
 > **Bases de données supportées :** PostgreSQL, MySQL/MariaDB et SQLite.
 
 ---
 
-## Architecture et cycle de vie des données
+## 🎯 Le guide pas-à-pas pour les débutants absolus
 
-La plupart des ORM traditionnels (comme Diesel ou SeaORM) vous obligent à définir manuellement des macros ou des structures Rust, que vous devez soigneusement maintenir pour correspondre à votre base de données. **Daox inverse totalement ce paradigme.**
+Ce guide est conçu avec une "précision militaire" pour une clarté absolue. Même si vous avez une expérience technique minimale, suivre ces étapes rigoureusement garantira votre succès.
 
-Voici l'approche **Database-first** (base de données d'abord) visualisée :
+### Étape 0 : Prérequis
 
-![Architecture et cycle de vie des données](./assets/architecture_fr.svg)
+Avant de commencer, assurez-vous d'avoir :
 
-### Pourquoi Daox ? (Fonctionnalités SOTA)
-
-- **Zéro surcoût :** Propulsé directement par `sqlx`. Aucune abstraction ORM lourde n'est chargée à l'exécution.
-- **Pagination O(1) par clé (Keyset) :** Pagination native par curseur (`list_by_cursor`) qui détruit les goulots d'étranglement de performance du traditionnel `OFFSET`.
-
-![Pagination O(1) par clé vs OFFSET](./assets/pagination_fr.svg)
-
-- **Flux d'exécution sans allocation (Streams) :** Traitez des millions de lignes efficacement via `stream_all()` sans les charger entièrement dans la RAM.
-
-![Flux d'exécution sans allocation](./assets/streams_fr.svg)
-
-- **Opérations par lots et Upserts SOTA :** Intégration stricte et native des `upserts` multi-bases (via `ON CONFLICT` sur PG/SQLite et `ON DUPLICATE KEY` pour MySQL). Préparez des batch atomiques ultra massifs avec `insert_many` et `upsert_many`.
-- **Patching intelligent :** Envoyez des mises à jour partielles sur le réseau (`update_partial_by_pk`) pour économiser de la bande passante et réduire les écritures disque de la base (WAL).
-- **Conscient du dialecte et sécurisé contre les injections :** Échappe automatiquement les mots-clés SQL réservés et identifie dynamiquement votre dialecte via `databases.toml`.
-- **Support multi-base dynamique :** Mixez PostgreSQL, MySQL et SQLite simultanément. L'introspection contourne les colisions dynamiquement et implante un workflow Zéro-Allocation.
-- **Clés composites et Index Secondaires :** Support de méthodes massives auto-générées (`get_by_{index}`, `delete_by_{index}`) avec des retours synchronisés sur Zéro-Allocation `Result<(), AppError>`.
+1. **Rust installé :** Allez sur [rustup.rs](https://rustup.rs/) et suivez les instructions pour installer Rust sur votre ordinateur.
+2. **Une base de données active :** Nous utiliserons PostgreSQL dans cet exemple. Si Docker est installé, vous pouvez en démarrer une via :
+   `docker run --name my-postgres -e POSTGRES_PASSWORD=password -p 5432:5432 -d postgres`
 
 ---
 
-## Le projet officiel de test & démo
+### Étape 1 : Créer votre nouveau projet
 
-Si vous préférez apprendre en lisant du code, nous vous recommandons vivement de cloner le dépôt GitHub et d'explorer le répertoire **`daox-test`**.
-
-C'est un projet de démonstration complet et prêt à l'emploi. Il inclut un fichier `docker-compose.yml` (pour PostgreSQL et MySQL) et teste de manière exhaustive chaque fonctionnalité de Daox sur les 3 dialectes SQL. C'est le terrain de jeu idéal pour apprendre le framework en toute sécurité !
-
----
-
-## Guide pas à pas (pour les novices en Rust)
-
-Ce guide pas à pas vous accompagne à travers l'ensemble du workflow Daox, de l'installation à l'exécution.
-
-### Étape 1 : Créer un projet & configuration
-
-Tout d'abord, créez un tout nouveau projet Rust dans votre terminal :
+Ouvrez votre terminal (Invite de commandes, PowerShell ou bash) et exécutez strictement ces commandes pour créer un nouveau projet Rust :
 
 ```bash
+# Ceci crée un nouveau dossier nommé 'mon_app' contenant un projet Rust vierge
 cargo new mon_app
+
+# Entrez dans le nouveau dossier
 cd mon_app
 ```
 
-En Rust, `Cargo.toml` est le fichier de configuration où vous déclarez vos dépendances. Puisque Daox génère du code **avant** que votre application ne soit compilée, il est ajouté en tant que "dépendance de compilation" (`build-dependency`).
+---
 
-Ouvrez votre `Cargo.toml` et ajoutez les lignes suivantes :
+### Étape 2 : Ajouter les dépendances requises
+
+Rust utilise un fichier appelé `Cargo.toml` pour gérer les outils et bibliothèques (les dépendances).
+Ouvrez le fichier `Cargo.toml` dans votre dossier `mon_app` avec n'importe quel éditeur de texte.
+
+Modifiez-le pour qu'il ressemble **exactement** à ceci :
 
 ```toml
+[package]
+name = "mon_app"
+version = "0.1.0"
+edition = "2021"
+
 [dependencies]
-# sqlx gère la connexion réelle à la base de données à l'exécution
-sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "mysql", "postgres", "sqlite"] }
-# futures est requis pour gérer les flux de données asynchrones de Daox
+# sqlx est l'outil qui permet de se connecter à la bdd quand l'app tourne
+sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres"] }
+# futures gère efficacement les flux de données (streams)
 futures = "0.3"
+# tokio fournit l'environnement asynchrone nécessaire à l'application
+tokio = { version = "1", features = ["full"] }
 
 [build-dependencies]
-# Daox s'exécute à la compilation pour générer votre code DAO
-daox = "0.2.4"
-# Tokio fournit l'environnement d'exécution asynchrone dont Daox a besoin pendant la génération
+# Daox est notre outil magique qui génère le code avant que l'app ne s'exécute
+daox = "0.2.5"
+# tokio est aussi nécessaire pour le script de génération de code
 tokio = { version = "1", features = ["full"] }
 ```
 
-### Étape 2 : Préparer le schéma de votre base de données
+---
 
-Parce que Daox est "Database-first", votre base de données et vos tables doivent exister **avant** la compilation. Assurez-vous d'avoir une base de données en cours de fonctionnement et créez cette table simple (exemple pour PostgreSQL) :
+### Étape 3 : Préparer votre base de données
+
+Daox est "Database-first" (Base de données en premier). Cela signifie que vos tables doivent exister dans votre base de données _avant_ que Daox ne puisse générer le code.
+
+Connectez-vous à votre base PostgreSQL (à l'aide de votre client préféré comme DBeaver, pgAdmin ou psql) et exécutez cette commande SQL précise pour créer une table `utilisateurs` :
 
 ```sql
 CREATE TABLE utilisateurs (
@@ -92,11 +88,15 @@ CREATE TABLE utilisateurs (
 );
 ```
 
-### Étape 3 : Le générateur de code (`build.rs`)
+---
 
-En créant un fichier nommé `build.rs` à la racine de votre projet, Cargo l'exécutera automatiquement avant de compiler le reste du code. Nous utilisons ce fichier pour déclencher Daox.
+### Étape 4 : Configurer le générateur de code (`build.rs`)
 
-Créez un fichier `build.rs` à la racine de votre projet :
+Nous avons besoin d'un script qui demandera à Daox d'inspecter la base de données et d'écrire le code Rust correspondant.
+
+Créez un nouveau fichier nommé très exactement `build.rs` à la racine de votre projet (dans le dossier `mon_app`, au même niveau que `Cargo.toml`).
+
+Copiez et collez ce code précis dans `build.rs` :
 
 ```rust
 use std::fs;
@@ -104,147 +104,151 @@ use std::path::Path;
 
 #[tokio::main]
 async fn main() {
-    // 1. Demander à Cargo de recompiler seulement si build.rs est modifié
+    // 1. Demander à Rust de ne rejouer ce script que si le script lui-même est modifié
     println!("cargo:rerun-if-changed=build.rs");
 
-    // 2. Définir l'URL de votre base de données
-    let db_url = "postgres://utilisateur:mdp@localhost:5432/ma_bdd";
+    // 2. Définissez votre URL de base de données exacte.
+    // Format : postgres://[utilisateur]:[mot_de_passe]@[hote]:[port]/[nom_bdd]
+    // CHANGEZ CETTE URL pour correspondre à vos identifiants si besoin !
+    let db_url = "postgres://postgres:password@localhost:5432/postgres";
 
-    // 3. Définir l'emplacement où Daox doit sauvegarder les fichiers Rust générés
-    let output_dir = "src/models";
-    if !Path::new(output_dir).exists() {
-        fs::create_dir_all(output_dir).unwrap();
-    }
+    // 3. Définissez le dossier où Daox sauvegardera le code généré
+    let output_dir = "src";
 
-    // 4. Se connecter à la base, lire le schéma, et générer !
+    // 4. Lancer Daox ! Il lira votre base de données et générera les fichiers Rust automatiquement.
     let generator = daox::DaoxGenerator::new(db_url, output_dir);
-    generator.generate().await.expect("Échec de la génération des DAO");
+    generator.generate().await.expect("ERREUR CRITIQUE : Échec de la génération des modèles. Vérifiez l'URL de votre base et sa connexion.");
 }
 ```
 
-### Étape 4 : Déclencher la génération
+---
 
-Générez les modèles en compilant votre projet dans le terminal :
+### Étape 5 : Écrire le code de votre application (`src/main.rs`)
 
-```bash
-cargo build
-```
-
-> **Que se passe-t-il ici ?** Cargo exécute `build.rs`. Daox se connecte à votre base de données, analyse en profondeur votre table `utilisateurs`, et génère proprement des fichiers parfaitement typés dans votre dossier `src/models/`.
-
-### Étape 5 : Votre application (`src/main.rs`)
-
-Tout est prêt ! Importez les modules générés et utilisez-les dans votre logique principale.
+Daox générera parfaitement votre code dans le fichier `src/daox_generated.rs`. Utilisons-le !
+Ouvrez le fichier `src/main.rs`, supprimez tout son contenu, et remplacez-le par ce code exact :
 
 ```rust
-pub mod models; // Inclure explicitement le module généré
+// 1. Indique à Rust d'inclure le fichier que Daox vient de générer
+pub mod daox_generated;
 
 use sqlx::postgres::PgPoolOptions;
-use futures::StreamExt; // Requis pour les flux de données continus
-use models::utilisateurs::Utilisateurs; // Importer la structure générée
+use futures::StreamExt; // Requis pour lire efficacement de nombreux utilisateurs
+use daox_generated::Utilisateurs; // Importer l'objet 'Utilisateurs' généré
 
 #[tokio::main]
 async fn main() -> Result<(), sqlx::Error> {
-    // 1. Ouvrir un pool de connexions vers votre base de données
-    let pool = PgPoolOptions::new().connect("postgres://utilisateur:mdp@localhost:5432/ma_bdd").await?;
+    // 2. Se connecter à la base. Assurez-vous que l'URL est la même que dans build.rs !
+    let db_url = "postgres://postgres:password@localhost:5432/postgres";
+    let pool = PgPoolOptions::new().connect(db_url).await?;
 
-    // --- CAS 1 : INSERTION CLASSIQUE ---
+    println!("Connecté à la base de données avec succès !");
+
+    // 3. CRÉER UN NOUVEL UTILISATEUR
     let nouvel_utilisateur = Utilisateurs {
-        id: 0, // Ignoré automatiquement par Daox pour les colonnes auto-incrémentées
-        email: "alice@daox.dev".into(),
-        statut: "actif".into(),
+        id: 0, // '0' est ignoré car PostgreSQL auto-génère l'ID seul
+        email: "hello@daox.dev".into(),
+        statut: Some("actif".to_string()),
     };
+
+    // Sauvegarder l'utilisateur dans la base
     let utilisateur_id = nouvel_utilisateur.insert(&pool).await?;
-    println!("ID de l'utilisateur inséré : {}", utilisateur_id);
+    println!("SUCCÈS : Nouvel utilisateur inséré avec l'ID {}", utilisateur_id);
 
-    // --- CAS 2 : PATCHING INTELLIGENT (Mise à jour partielle) ---
-    // Mettre à jour *uniquement* le statut. Daox génère purement du SQL statique Zéro Allocation.
-    Utilisateurs::update_statut(&pool, &(utilisateur_id as i64), "inactif").await?;
+    // 4. METTRE À JOUR L'UTILISATEUR (Smart Patching)
+    // Nous mettons à jour UNIQUEMENT la colonne statut de manière chirurgicale
+    Utilisateurs::update_partial_by_id(&pool, utilisateur_id as i64, &daox_generated::UtilisateursPatch {
+        statut: Some(Some("inactif".to_string())),
+        ..Default::default()
+    }).await?;
+    println!("SUCCÈS : Statut de l'utilisateur mis à jour à 'inactif'");
 
-    // --- CAS 4 : FLUX SANS ALLOCATION (Streaming) ---
-    // Itérer proprement, ligne par ligne, sans déborder la mémoire du système
+    // 5. LIRE TOUS LES UTILISATEURS (Streaming)
+    // Daox diffuse la donnée ligne par ligne, la RAM de votre PC ne saturera jamais
     let mut stream = Utilisateurs::stream_all(&pool);
+    println!("--- Liste de tous les utilisateurs ---");
     while let Some(user_result) = stream.next().await {
         let user = user_result?;
-        println!("Utilisateur trouvé : {}", user.email);
+        println!("Utilisateur : ID {}, Email {}, Statut {:?}", user.id, user.email, user.statut);
     }
 
     Ok(())
 }
 ```
 
-### Étape 6 : Exécuter votre code
+---
 
-Lancez votre application :
+### Étape 6 : Compiler et Lancer !
+
+Vous êtes prêt. Retournez dans votre terminal (assurez-vous d'être bien dans le dossier `mon_app`) et lancez votre programme :
 
 ```bash
 cargo run
 ```
 
----
+**Que se passe-t-il exactement ?**
 
-## Aperçu des méthodes générées et cas d'usage
+1. Le script `build.rs` s'exécute en premier. Daox se connecte, lit la structure de la table `utilisateurs`, et rédige automatiquement un code Rust parfait dans le fichier `src/daox_generated.rs`.
+2. `src/main.rs` utilise directement ce code tout fraichement créé.
+3. Le programme sauvegarde un utilisateur en base, met à jour son statut, et imprime tous les utilisateurs à l'écran.
 
-Daox comprend précisément votre schéma. En fonction de vos colonnes et de vos index, il génère les méthodes adéquates et structurellement saines.
-
-### Méthodes globales à la table
-
-- **`count(executor)`** ➔ Compte total des lignes de la table. _(Idéal pour les indicateurs (KPIs) d'un tableau de bord)_
-- **`stream_all(executor)`** ➔ Streaming des lignes sans allouer la mémoire. _(Crucial pour l'exportation de Big Data ou les migrations en arrière-plan)_
-- **`list_paginated(executor, order, page, size)`** ➔ Pagination traditionnelle. _(Pour les grilles de données internes)_
-
-### Méthodes d'écriture
-
-- **`insert(&self, executor)`** ➔ Insère la structure et retourne l'ID généré.
-- **`insert_batch(executor, &[Self])`** ➔ Insertion de masse à haute performance.
-- **`upsert(&self, executor)`** ➔ Insère, ou met à jour de manière puissante si un conflit sur unicité se produit.
-
-### Méthodes pilotées par la clé primaire (PK)
-
-- **`get_by_{id}(executor, pk)`** ➔ Récupère un enregistrement précis en matchant le nom de la PK (ex: `get_by_email`).
-- **`exists_by_{id}(executor, pk)`** ➔ Vérification ultra-rapide optimisée par cache sans charger la ligne complète.
-- **`update_by_{id}(&self, executor)`** ➔ Écrase complètement l'enregistrement dans la base de données.
-- **`update_{colonne}(executor, pk, val)`** ➔ Patch granulaire pur-SQL pour chaque colonne. (Zéro Allocation).
-- **`delete_by_{id}(executor, pk)`** ➔ Suppression d'un enregistrement unique.
-- **`delete_all(executor)`** ➔ Suppression massive (Truncate) hyper véloce.
-
-### Méthodes d'index auto-générées
-
-Daox scrute les index de votre BDD et cartographie des méthodes de requête parfaitement optimisées.
-_(Exemple, pour un index sur `email`)_
-
-- **`get_by_{col1_and_col2}`** ➔ Navigue magiquement les index B-Tree, uniques ET composites pour requêter dynamiquement multi-colonnes.
+**Félicitations ! Vous maîtrisez désormais l'implantation de Daox.**
 
 ---
 
-## Modèles d'interaction avancés
+## 🚀 Architecture avancée & Capacités de Daox
 
-### 1. Robustesse par transactions
+Si vous êtes un utilisateur technique, voici pourquoi Daox établit l'État de l'Art (State Of The Art - SOTA) parmi les ORM Rust.
 
-Chaque méthode Daox auto-générée accepte de manière inhérente un objet (`executor`). Vous n'êtes pas forcé de passer votre pool global `&pool` ; vous pouvez facilement grouper et exécuter des opérations de manière atomique au coeur d'une transaction :
+### Le Paradigme Database-First (Base de données en premier)
+
+La plupart des ORM traditionnels (comme Diesel ou SeaORM) vous obligent à définir manuellement des macros ou structures Rust que vous devez rigoureusement aligner avec votre base. **Daox inverse totalement cette approche.**
+
+Voici le processus modélisé :
+
+![Architecture et cycle de vie des données](./assets/architecture_fr.svg)
+
+### Fonctionnalités de Qualité Supérieure (SOTA)
+
+- **Zéro surcoût :** Propulsé par `sqlx`. Aucune abstraction ORM lourde en exécution.
+- **Pagination O(1) par clé (Keyset) :** Pagination par curseur native (`list_by_cursor`) détruisant les goulots d'étranglement de l'inefficace commande `OFFSET`.
+
+![Pagination O(1) par clé vs OFFSET](./assets/pagination_fr.svg)
+
+- **Flux d'exécution sans allocation (Streams) :** Traitez des millions de lignes via `stream_all()` sans les charger entièrement dans votre RAM.
+
+![Flux d'exécution sans allocation](./assets/streams_fr.svg)
+
+- **Opérations par lots et Upserts SOTA :** Intégration stricte native avec gestion parfaite multi-bases (`ON CONFLICT` et `ON DUPLICATE KEY`). ACID atomicity 100% garanti de manière ultra performante.
+- **Patching intelligent :** Mises à jour partielles garanties (`update_partial_by_pk`) pour réduire la bande passante et l'usure de vos disques (WAL).
+- **Conscient du dialecte et sécurisé contre les injections :** Échappement méticuleux.
+- **Clés composites et Index Secondaires :** Génération native multi-clés primaires.
+
+### Modèles d'Interaction Avancés
+
+#### Robustesse par Transactions
+
+Chaque méthode s'attend à un environnement transactionnel `executor` naturel :
 
 ```rust
 let mut tx = pool.begin().await?;
 
-// Exécute proprement sous la même enveloppe de transaction
+// Exécute proprement sous la même transaction
 let utilisateur_id = nouvel_utilisateur.insert(&mut *tx).await?;
-Utilisateurs::delete_by_pk(&mut *tx, &(utilisateur_id as i64)).await?;
+Utilisateurs::delete_by_id(&mut *tx, utilisateur_id as i64).await?;
 
-tx.commit().await?; // Validation des modifications BDD
+tx.commit().await?; // Base de données validée
 ```
 
-### 2. Typage immédiat par l'IDE (Sync)
+#### Typage immédiat par l'IDE (Sync)
 
-En s'intégrant au coeur de `cargo build`, Daox garantit que vos modèles Rust reflètent votre schéma de base de données en 1 pour 1.
-
-Si vous renommez une colonne, le prochain `cargo build` mettra instantanément à jour `src/models/*.rs`. Votre code appelant l'ancien nom de cette colonne provoquera immédiatement une **erreur de compilation**. Ceci garantit une robustesse maximale - les propriétés typées dont vous bénéficiez demeurent toujours l'unique source de vérité.
+Si vous renommez une colonne dans votre base de données, relancez simplement `cargo build`. Daox met à jour `src/daox_generated.rs` instantanément. Le code qui utilise l'ancien nom de colonne **échouera immédiatement à la compilation**, sécurisant parfaitement la structure de votre application.
 
 ---
 
-## Structure du dépôt
+## Le projet officiel de Test & Démo
 
-- **`daox/`** : Le code coeur du framework visant le registre `crates.io`.
-- **`daox-test/`** : La très complète suite d'intégration servant de terrain de jeu d'apprentissage pour vérifier simultanément tout le comportement du code sur MySQL, Postgres et SQLite via Docker.
+Pour vérifier ces allégations par le code, clonez le dépôt et explorez le répertoire **`daox-test`**. C'est une suite de test exhaustive (Docker inclus pour MySQL et Postgres) qui valide l'ensemble des limites de Daox.
 
 ---
 
