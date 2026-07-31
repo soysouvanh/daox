@@ -1841,32 +1841,6 @@ impl UserRoles {
         Ok(())
     }
 
-    /// Retrieves records by index `idx_user_role`.
-    pub async fn get_by_user_id_and_role_name(ctx: &mut RequestContext, user_id: i64, role_name: &str) -> Result<Option<Self>, lightx::core::AppError> {
-        let mut query = sqlx::query_as(r#"SELECT `assigned_at`, `role_name`, `user_id` FROM user_roles WHERE `user_id` = ? AND `role_name` = ?"#);
-        query = query.bind(&user_id);
-        query = query.bind(role_name);
-        let records = if let Some(tx) = ctx.default_tx.as_mut() {
-            query.fetch_optional(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
-        } else {
-            query.fetch_optional(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
-        };
-        Ok(records)
-    }
-
-    /// Deletes records matching the index `idx_user_role`.
-    pub async fn delete_by_user_id_and_role_name(ctx: &mut RequestContext, user_id: i64, role_name: &str) -> Result<(), lightx::core::AppError> {
-        let mut query = sqlx::query(r#"DELETE FROM user_roles WHERE `user_id` = ? AND `role_name` = ?"#);
-        query = query.bind(&user_id);
-        query = query.bind(role_name);
-        if let Some(tx) = ctx.default_tx.as_mut() {
-            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
-        } else {
-            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
-        }
-        Ok(())
-    }
-
     /// Retrieves records by index `idx_user_id`.
     pub async fn get_by_user_id(ctx: &mut RequestContext, user_id: i64) -> Result<Vec<Self>, lightx::core::AppError> {
         let mut query = sqlx::query_as(r#"SELECT `assigned_at`, `role_name`, `user_id` FROM user_roles WHERE `user_id` = ?"#);
@@ -1897,6 +1871,32 @@ impl UserRoles {
     pub async fn delete_by_user_id(ctx: &mut RequestContext, user_id: i64) -> Result<(), lightx::core::AppError> {
         let mut query = sqlx::query(r#"DELETE FROM user_roles WHERE `user_id` = ?"#);
         query = query.bind(&user_id);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
+    /// Retrieves records by index `idx_user_role`.
+    pub async fn get_by_user_id_and_role_name(ctx: &mut RequestContext, user_id: i64, role_name: &str) -> Result<Option<Self>, lightx::core::AppError> {
+        let mut query = sqlx::query_as(r#"SELECT `assigned_at`, `role_name`, `user_id` FROM user_roles WHERE `user_id` = ? AND `role_name` = ?"#);
+        query = query.bind(&user_id);
+        query = query.bind(role_name);
+        let records = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_optional(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_optional(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(records)
+    }
+
+    /// Deletes records matching the index `idx_user_role`.
+    pub async fn delete_by_user_id_and_role_name(ctx: &mut RequestContext, user_id: i64, role_name: &str) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"DELETE FROM user_roles WHERE `user_id` = ? AND `role_name` = ?"#);
+        query = query.bind(&user_id);
+        query = query.bind(role_name);
         if let Some(tx) = ctx.default_tx.as_mut() {
             query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         } else {
@@ -2151,6 +2151,30 @@ impl Users {
         Ok(())
     }
 
+    /// Retrieves records by index `idx_email`.
+    pub async fn get_by_email(ctx: &mut RequestContext, email: &str) -> Result<Option<Self>, lightx::core::AppError> {
+        let mut query = sqlx::query_as(r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM users WHERE `email` = ?"#);
+        query = query.bind(email);
+        let records = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_optional(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_optional(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(records)
+    }
+
+    /// Deletes records matching the index `idx_email`.
+    pub async fn delete_by_email(ctx: &mut RequestContext, email: &str) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"DELETE FROM users WHERE `email` = ?"#);
+        query = query.bind(email);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
     /// Retrieves records by index `idx_name`.
     pub async fn get_by_last_name_and_first_name(ctx: &mut RequestContext, last_name: &str, first_name: &str) -> Result<Vec<Self>, lightx::core::AppError> {
         let mut query = sqlx::query_as(r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM users WHERE `last_name` = ? AND `first_name` = ?"#);
@@ -2184,30 +2208,6 @@ impl Users {
         let mut query = sqlx::query(r#"DELETE FROM users WHERE `last_name` = ? AND `first_name` = ?"#);
         query = query.bind(last_name);
         query = query.bind(first_name);
-        if let Some(tx) = ctx.default_tx.as_mut() {
-            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
-        } else {
-            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
-        }
-        Ok(())
-    }
-
-    /// Retrieves records by index `idx_email`.
-    pub async fn get_by_email(ctx: &mut RequestContext, email: &str) -> Result<Option<Self>, lightx::core::AppError> {
-        let mut query = sqlx::query_as(r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM users WHERE `email` = ?"#);
-        query = query.bind(email);
-        let records = if let Some(tx) = ctx.default_tx.as_mut() {
-            query.fetch_optional(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
-        } else {
-            query.fetch_optional(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
-        };
-        Ok(records)
-    }
-
-    /// Deletes records matching the index `idx_email`.
-    pub async fn delete_by_email(ctx: &mut RequestContext, email: &str) -> Result<(), lightx::core::AppError> {
-        let mut query = sqlx::query(r#"DELETE FROM users WHERE `email` = ?"#);
-        query = query.bind(email);
         if let Some(tx) = ctx.default_tx.as_mut() {
             query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         } else {
