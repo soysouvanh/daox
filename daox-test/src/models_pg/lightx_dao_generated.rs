@@ -29,7 +29,7 @@ impl AppContextFactory {
             global_state: std::sync::Arc::new(lightx::ext::tokio::sync::broadcast::channel(1024).0),
             rate_limiter: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().build()),
             response_cache: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().build()),
-            default_pool: sqlx::postgres::PgPoolOptions::new().connect(&std::env::var("DEFAULT_DATABASE_URL").or_else(|_| std::env::var("DATABASE_URL")).unwrap_or_else(|_| "postgres://postgres:postgres@127.0.0.1:5432/my_database".to_string())).await.map_err(|e| lightx::core::AppError::SystemError { msg: e.to_string(), file: file!(), line: line!() })?,
+            default_pool: sqlx::postgres::PgPoolOptions::new().connect(&std::env::var("DEFAULT_DATABASE_URL").or_else(|_| std::env::var("DATABASE_URL")).map_err(|_| lightx::core::AppError::SystemError { msg: "Missing DATABASE_URL configuration".to_string(), file: file!(), line: line!() })?).await.map_err(|e| lightx::core::AppError::SystemError { msg: e.to_string(), file: file!(), line: line!() })?,
         })
     }
 }
@@ -118,7 +118,7 @@ impl ActiveUsers {
         } else {
             query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
         };
-        Ok(0) // Postgres RETURNING mapping natively bypassed in base generator
+        Ok(0) // Postgres table has no auto-increment column to map
     }
 
     /// Deletes all records in the table. Returns the number of affected rows.
@@ -192,21 +192,22 @@ pub struct Configurations {
 impl Configurations {
     /// Inserts the current record. (Execution uses Pool unless a Transaction is active)
     pub async fn insert(&self, ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
-        let mut query = sqlx::query(r#"INSERT INTO "configurations" ("match", "type", "value") VALUES ($1, $2, $3)"#);
+        let mut query = sqlx::query_scalar::<_, i32>(r#"INSERT INTO "configurations" ("match", "type", "value") VALUES ($1, $2, $3) RETURNING "id""#);
         query = query.bind(&self.r#match);
         query = query.bind(&self.r#type);
         query = query.bind(&self.value);
-        let _result = if let Some(tx) = ctx.default_tx.as_mut() {
-            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        let result_id = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_one(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
         } else {
-            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+            query.fetch_one(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
         };
-        Ok(0) // Postgres RETURNING mapping natively bypassed in base generator
+        Ok(result_id as u64)
     }
 
     /// Upserts the current record (Insert or Update if PK conflicts).
     pub async fn upsert(&self, ctx: &mut RequestContext) -> Result<(), lightx::core::AppError> {
-        let mut query = sqlx::query(r#"INSERT INTO "configurations" ("match", "type", "value") VALUES ($1, $2, $3) ON CONFLICT ("id") DO UPDATE SET "match" = EXCLUDED."match", "type" = EXCLUDED."type", "value" = EXCLUDED."value""#);
+        let mut query = sqlx::query(r#"INSERT INTO "configurations" ("id", "match", "type", "value") VALUES ($1, $2, $3, $4) ON CONFLICT ("id") DO UPDATE SET "match" = EXCLUDED."match", "type" = EXCLUDED."type", "value" = EXCLUDED."value""#);
+        query = query.bind(&self.id);
         query = query.bind(&self.r#match);
         query = query.bind(&self.r#type);
         query = query.bind(&self.value);
@@ -411,7 +412,7 @@ impl Currencies {
         } else {
             query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
         };
-        Ok(0) // Postgres RETURNING mapping natively bypassed in base generator
+        Ok(0) // Postgres table has no auto-increment column to map
     }
 
     /// Upserts the current record (Insert or Update if PK conflicts).
@@ -596,7 +597,7 @@ impl OrderItems {
         } else {
             query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
         };
-        Ok(0) // Postgres RETURNING mapping natively bypassed in base generator
+        Ok(0) // Postgres table has no auto-increment column to map
     }
 
     /// Upserts the current record (Insert or Update if PK conflicts).
@@ -769,7 +770,7 @@ impl ProductMetadata {
         } else {
             query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
         };
-        Ok(0) // Postgres RETURNING mapping natively bypassed in base generator
+        Ok(0) // Postgres table has no auto-increment column to map
     }
 
     /// Upserts the current record (Insert or Update if PK conflicts).
@@ -982,7 +983,7 @@ impl UserRoles {
         } else {
             query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
         };
-        Ok(0) // Postgres RETURNING mapping natively bypassed in base generator
+        Ok(0) // Postgres table has no auto-increment column to map
     }
 
     /// Upserts the current record (Insert or Update if PK conflicts).
@@ -1211,26 +1212,27 @@ pub struct Users {
 impl Users {
     /// Inserts the current record. (Execution uses Pool unless a Transaction is active)
     pub async fn insert(&self, ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
-        let mut query = sqlx::query(r#"INSERT INTO "users" ("created_at", "email", "first_name", "last_name", "status") VALUES ($1, $2, $3, $4, $5)"#);
+        let mut query = sqlx::query_scalar::<_, i64>(r#"INSERT INTO "users" ("created_at", "email", "first_name", "last_name", "status") VALUES ($1, $2, $3, $4, $5) RETURNING "id""#);
         query = query.bind(&self.created_at);
         query = query.bind(&self.email);
         query = query.bind(&self.first_name);
         query = query.bind(&self.last_name);
         query = query.bind(&self.status);
-        let _result = if let Some(tx) = ctx.default_tx.as_mut() {
-            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        let result_id = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_one(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
         } else {
-            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+            query.fetch_one(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
         };
-        Ok(0) // Postgres RETURNING mapping natively bypassed in base generator
+        Ok(result_id as u64)
     }
 
     /// Upserts the current record (Insert or Update if PK conflicts).
     pub async fn upsert(&self, ctx: &mut RequestContext) -> Result<(), lightx::core::AppError> {
-        let mut query = sqlx::query(r#"INSERT INTO "users" ("created_at", "email", "first_name", "last_name", "status") VALUES ($1, $2, $3, $4, $5) ON CONFLICT ("id") DO UPDATE SET "created_at" = EXCLUDED."created_at", "email" = EXCLUDED."email", "first_name" = EXCLUDED."first_name", "last_name" = EXCLUDED."last_name", "status" = EXCLUDED."status""#);
+        let mut query = sqlx::query(r#"INSERT INTO "users" ("created_at", "email", "first_name", "id", "last_name", "status") VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT ("id") DO UPDATE SET "created_at" = EXCLUDED."created_at", "email" = EXCLUDED."email", "first_name" = EXCLUDED."first_name", "last_name" = EXCLUDED."last_name", "status" = EXCLUDED."status""#);
         query = query.bind(&self.created_at);
         query = query.bind(&self.email);
         query = query.bind(&self.first_name);
+        query = query.bind(&self.id);
         query = query.bind(&self.last_name);
         query = query.bind(&self.status);
         if let Some(tx) = ctx.default_tx.as_mut() {

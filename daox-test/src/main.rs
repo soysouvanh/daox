@@ -69,10 +69,13 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
         .unwrap();
     assert!(exists);
 
-    // Upsert not generated yet, let's test Partial Update
-    Users::update_status(&mut ctx, user1_id as i64, "banned")
+    // TEST UPSERT
+    let mut user_to_upsert = Users::get_by_id(&mut ctx, user1_id as i64)
         .await
+        .unwrap()
         .unwrap();
+    user_to_upsert.status = "banned".into();
+    user_to_upsert.upsert(&mut ctx).await.unwrap();
     let check_patch = Users::get_by_id(&mut ctx, user1_id as i64)
         .await
         .unwrap()
@@ -92,6 +95,11 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
     }
     Users::insert_many(&batch_users, &mut ctx).await.unwrap();
 
+    let count = Users::count(&mut ctx).await.unwrap();
+    assert!(count >= 51);
+
+    let all_users = Users::find_all(&mut ctx, 10, 0).await.unwrap();
+    assert_eq!(all_users.len(), 10);
     let page = Users::list_by_id_cursor(&mut ctx, Some(user1_id as i64), 5)
         .await
         .unwrap();
@@ -113,6 +121,9 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
     };
     item.insert(&mut ctx).await.unwrap();
 
+    let deleted_users = Users::delete_all(&mut ctx).await.unwrap();
+    assert!(deleted_users >= 51);
+
     // TEST UPSERT
     item.quantity = 15;
     item.upsert(&mut ctx).await.unwrap();
@@ -125,6 +136,45 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
     OrderItems::delete_by_order_id_and_product_id(&mut ctx, 101, 42)
         .await
         .unwrap();
+
+    // TEST TRANSACTIONS (ROLLBACK)
+    ctx.get_or_create_default_tx().await.unwrap();
+    let user_tx = Users {
+        id: 0,
+        email: "tx_rollback_pg@daox.dev".into(),
+        first_name: Some("Tx".into()),
+        last_name: "Rollback".into(),
+        status: "active".into(),
+        created_at: None,
+    };
+    user_tx.insert(&mut ctx).await.unwrap();
+    ctx.rollback_default_tx().await.unwrap();
+    let all_users_rollback = Users::find_all(&mut ctx, 100, 0).await.unwrap();
+    assert!(
+        !all_users_rollback
+            .iter()
+            .any(|u| u.email == "tx_rollback_pg@daox.dev")
+    );
+
+    // TEST TRANSACTIONS (COMMIT)
+    ctx.get_or_create_default_tx().await.unwrap();
+    let user_tx2 = Users {
+        id: 0,
+        email: "tx_commit_pg@daox.dev".into(),
+        first_name: Some("Tx".into()),
+        last_name: "Commit".into(),
+        status: "active".into(),
+        created_at: None,
+    };
+    user_tx2.insert(&mut ctx).await.unwrap();
+    ctx.commit_default_tx().await.unwrap();
+    let all_users_commit = Users::find_all(&mut ctx, 100, 0).await.unwrap();
+    assert!(
+        all_users_commit
+            .iter()
+            .any(|u| u.email == "tx_commit_pg@daox.dev")
+    );
+
     println!("🎉 TOUS LES TESTS POSTGRESQL ONT RÉUSSI ! Daox est prêt pour la production.");
     Ok(())
 }
@@ -173,9 +223,13 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
         .unwrap();
     assert!(exists);
 
-    Users::update_status(&mut ctx, user1_id as i64, "banned")
+    // TEST UPSERT
+    let mut user_to_upsert = Users::get_by_id(&mut ctx, user1_id as i64)
         .await
+        .unwrap()
         .unwrap();
+    user_to_upsert.status = "banned".into();
+    user_to_upsert.upsert(&mut ctx).await.unwrap();
     let check_patch = Users::get_by_id(&mut ctx, user1_id as i64)
         .await
         .unwrap()
@@ -194,6 +248,12 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
         });
     }
     Users::insert_many(&batch_users, &mut ctx).await.unwrap();
+
+    let count = Users::count(&mut ctx).await.unwrap();
+    assert!(count >= 51);
+
+    let all_users = Users::find_all(&mut ctx, 10, 0).await.unwrap();
+    assert_eq!(all_users.len(), 10);
 
     let page = Users::list_by_id_cursor(&mut ctx, Some(user1_id as i64), 5)
         .await
@@ -216,6 +276,9 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
     };
     item.insert(&mut ctx).await.unwrap();
 
+    let deleted_users = Users::delete_all(&mut ctx).await.unwrap();
+    assert!(deleted_users >= 51);
+
     // TEST UPSERT
     item.quantity = 25;
     item.upsert(&mut ctx).await.unwrap();
@@ -228,6 +291,45 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
     OrderItems::delete_by_order_id_and_product_id(&mut ctx, 200, 99)
         .await
         .unwrap();
+
+    // TEST TRANSACTIONS (ROLLBACK)
+    ctx.get_or_create_default_tx().await.unwrap();
+    let user_tx = Users {
+        id: 0,
+        email: "tx_rollback_mysql@daox.dev".into(),
+        first_name: Some("Tx".into()),
+        last_name: "Rollback".into(),
+        status: "active".into(),
+        created_at: None,
+    };
+    user_tx.insert(&mut ctx).await.unwrap();
+    ctx.rollback_default_tx().await.unwrap();
+    let all_users_rollback = Users::find_all(&mut ctx, 100, 0).await.unwrap();
+    assert!(
+        !all_users_rollback
+            .iter()
+            .any(|u| u.email == "tx_rollback_mysql@daox.dev")
+    );
+
+    // TEST TRANSACTIONS (COMMIT)
+    ctx.get_or_create_default_tx().await.unwrap();
+    let user_tx2 = Users {
+        id: 0,
+        email: "tx_commit_mysql@daox.dev".into(),
+        first_name: Some("Tx".into()),
+        last_name: "Commit".into(),
+        status: "active".into(),
+        created_at: None,
+    };
+    user_tx2.insert(&mut ctx).await.unwrap();
+    ctx.commit_default_tx().await.unwrap();
+    let all_users_commit = Users::find_all(&mut ctx, 100, 0).await.unwrap();
+    assert!(
+        all_users_commit
+            .iter()
+            .any(|u| u.email == "tx_commit_mysql@daox.dev")
+    );
+
     println!("🎉 TOUS LES TESTS MYSQL ONT RÉUSSI ! Daox est prêt pour la production.");
     Ok(())
 }
@@ -278,9 +380,13 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
         .unwrap();
     assert!(exists);
 
-    Users::update_status(&mut ctx, user1_id as i64, "inactive")
+    // TEST UPSERT
+    let mut user_to_upsert = Users::get_by_id(&mut ctx, user1_id as i64)
         .await
+        .unwrap()
         .unwrap();
+    user_to_upsert.status = "inactive".into();
+    user_to_upsert.upsert(&mut ctx).await.unwrap();
     let check_patch = Users::get_by_id(&mut ctx, user1_id as i64)
         .await
         .unwrap()
@@ -299,6 +405,12 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
         });
     }
     Users::insert_many(&batch_users, &mut ctx).await.unwrap();
+
+    let count = Users::count(&mut ctx).await.unwrap();
+    assert!(count >= 51);
+
+    let all_users = Users::find_all(&mut ctx, 10, 0).await.unwrap();
+    assert_eq!(all_users.len(), 10);
 
     let page = Users::list_by_id_cursor(&mut ctx, Some(user1_id as i64), 5)
         .await
@@ -321,6 +433,9 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
     };
     item.insert(&mut ctx).await.unwrap();
 
+    let deleted_users = Users::delete_all(&mut ctx).await.unwrap();
+    assert!(deleted_users >= 51);
+
     // TEST UPSERT
     item.quantity = 35;
     item.upsert(&mut ctx).await.unwrap();
@@ -333,6 +448,45 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
     OrderItems::delete_by_order_id_and_product_id(&mut ctx, 300, 99)
         .await
         .unwrap();
+
+    // TEST TRANSACTIONS (ROLLBACK)
+    ctx.get_or_create_default_tx().await.unwrap();
+    let user_tx = Users {
+        id: 0,
+        email: "tx_rollback_sqlite@daox.dev".into(),
+        first_name: Some("Tx".into()),
+        last_name: "Rollback".into(),
+        status: "active".into(),
+        created_at: None,
+    };
+    user_tx.insert(&mut ctx).await.unwrap();
+    ctx.rollback_default_tx().await.unwrap();
+    let all_users_rollback = Users::find_all(&mut ctx, 100, 0).await.unwrap();
+    assert!(
+        !all_users_rollback
+            .iter()
+            .any(|u| u.email == "tx_rollback_sqlite@daox.dev")
+    );
+
+    // TEST TRANSACTIONS (COMMIT)
+    ctx.get_or_create_default_tx().await.unwrap();
+    let user_tx2 = Users {
+        id: 0,
+        email: "tx_commit_sqlite@daox.dev".into(),
+        first_name: Some("Tx".into()),
+        last_name: "Commit".into(),
+        status: "active".into(),
+        created_at: None,
+    };
+    user_tx2.insert(&mut ctx).await.unwrap();
+    ctx.commit_default_tx().await.unwrap();
+    let all_users_commit = Users::find_all(&mut ctx, 100, 0).await.unwrap();
+    assert!(
+        all_users_commit
+            .iter()
+            .any(|u| u.email == "tx_commit_sqlite@daox.dev")
+    );
+
     println!("🎉 TOUS LES TESTS SQLITE ONT RÉUSSI ! Daox est prêt pour la production.");
     Ok(())
 }

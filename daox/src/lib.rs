@@ -889,15 +889,6 @@ message = "Le nom de famille doit faire au moins 5 caractères (Surcharge manuel
                 "sqlx::mysql::MySqlPoolOptions"
             }
         };
-        let get_fallback_url = |dialect: &str| -> &str {
-            if dialect == "postgres" {
-                "postgres://postgres:postgres@127.0.0.1:5432/my_database"
-            } else if dialect == "sqlite" {
-                "sqlite::memory:"
-            } else {
-                "mysql://root:root@127.0.0.1:3306/my_database"
-            }
-        };
 
         code.push_str("pub struct RequestContext {\n");
         code.push_str("    pub raw_body: lightx::ext::bytes::Bytes,\n");
@@ -945,7 +936,7 @@ message = "Le nom de famille doit faire au moins 5 caractères (Surcharge manuel
         code.push_str("            response_cache: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().build()),\n");
         for db in &db_keys {
             let dialect = get_dialect(db);
-            code.push_str(&format!("            {}_pool: {}::new().connect(&std::env::var(\"{}_DATABASE_URL\").or_else(|_| std::env::var(\"DATABASE_URL\")).unwrap_or_else(|_| \"{}\".to_string())).await.map_err(|e| lightx::core::AppError::SystemError {{ msg: e.to_string(), file: file!(), line: line!() }})?,\n", db, get_pool_options(&dialect), db.to_uppercase(), get_fallback_url(&dialect)));
+            code.push_str(&format!("            {}_pool: {}::new().connect(&std::env::var(\"{}_DATABASE_URL\").or_else(|_| std::env::var(\"DATABASE_URL\")).map_err(|_| lightx::core::AppError::SystemError {{ msg: \"Missing DATABASE_URL configuration\".to_string(), file: file!(), line: line!() }})?).await.map_err(|e| lightx::core::AppError::SystemError {{ msg: e.to_string(), file: file!(), line: line!() }})?,\n", db, get_pool_options(&dialect), db.to_uppercase()));
         }
         code.push_str("        })\n");
         code.push_str("    }\n");
@@ -1068,16 +1059,23 @@ message = "Le nom de famille doit faire au moins 5 caractères (Surcharge manuel
             let mut pk_cols = Vec::new();
             let mut insert_cols = Vec::new();
             let mut update_cols = Vec::new();
+            let mut upsert_cols = Vec::new();
+            let mut auto_inc_col = None;
 
             for (col_name, col_meta) in &cols {
                 if col_meta.is_primary_key.value() {
                     pk_cols.push((col_name.to_string(), (*col_meta).clone()));
                 }
-                if !col_meta.is_auto_increment.value() {
+                if col_meta.is_auto_increment.value() {
+                    auto_inc_col = Some(col_name.to_string());
+                } else {
                     insert_cols.push((col_name.to_string(), (*col_meta).clone()));
                 }
                 if !col_meta.is_primary_key.value() {
                     update_cols.push((col_name.to_string(), (*col_meta).clone()));
+                }
+                if !col_meta.is_auto_increment.value() || col_meta.is_primary_key.value() {
+                    upsert_cols.push((col_name.to_string(), (*col_meta).clone()));
                 }
             }
 
@@ -1132,26 +1130,63 @@ message = "Le nom de famille doit faire au moins 5 caractères (Surcharge manuel
                 } else {
                     table.sql_table_name.as_ref().unwrap_or(&table.name).clone()
                 };
-                code.push_str(&format!(
-                    "        let mut query = sqlx::query(r#\"INSERT INTO {} ({}) VALUES ({})\"#);\n",
-                    table_name_q, col_names, placeholders
-                ));
+
+                let mut is_pg_returning = false;
+                if is_postgres {
+                    if let Some(col) = auto_inc_col.as_ref() {
+                        is_pg_returning = true;
+                        let mut pg_return_type = "i64".to_string();
+                        if let Some(col_meta) = table.columns.get(col) {
+                            let rust_t = col_meta.rust_type.value();
+                            if rust_t == "i32" || rust_t == "u32" || rust_t == "i16" {
+                                pg_return_type = rust_t;
+                            }
+                        }
+                        code.push_str(&format!(
+                            "        let mut query = sqlx::query_scalar::<_, {}>(r#\"INSERT INTO {} ({}) VALUES ({}) RETURNING \"{}\"\"#);\n",
+                            pg_return_type, table_name_q, col_names, placeholders, col
+                        ));
+                    } else {
+                        code.push_str(&format!("        let mut query = sqlx::query(r#\"INSERT INTO {} ({}) VALUES ({})\"#);\n", table_name_q, col_names, placeholders));
+                    }
+                } else {
+                    code.push_str(&format!("        let mut query = sqlx::query(r#\"INSERT INTO {} ({}) VALUES ({})\"#);\n", table_name_q, col_names, placeholders));
+                }
 
                 for (col_name, _) in &insert_cols {
                     let field = Self::escape_rust_keyword(col_name);
                     code.push_str(&format!("        query = query.bind(&self.{});\n", field));
                 }
-                let result_var = if is_postgres { "_result" } else { "result" };
+
+                let result_var = if is_pg_returning {
+                    "result_id"
+                } else if is_postgres {
+                    "_result"
+                } else {
+                    "result"
+                };
                 code.push_str(&format!(
                     "        let {} = if let Some(tx) = ctx.{}_tx.as_mut() {{\n",
                     result_var, db_name
                 ));
-                code.push_str("            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?\n");
+                if is_pg_returning {
+                    code.push_str("            query.fetch_one(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?\n");
+                } else {
+                    code.push_str("            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?\n");
+                }
                 code.push_str("        } else {\n");
-                code.push_str(&format!("            query.execute(&ctx.{}_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError {{ msg: e.to_string(), file: file!(), line: line!() }})?\n", db_name));
+                if is_pg_returning {
+                    code.push_str(&format!("            query.fetch_one(&ctx.{}_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError {{ msg: e.to_string(), file: file!(), line: line!() }})?\n", db_name));
+                } else {
+                    code.push_str(&format!("            query.execute(&ctx.{}_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError {{ msg: e.to_string(), file: file!(), line: line!() }})?\n", db_name));
+                }
                 code.push_str("        };\n");
-                if is_postgres {
-                    code.push_str("        Ok(0) // Postgres RETURNING mapping natively bypassed in base generator\n");
+                if is_pg_returning {
+                    code.push_str("        Ok(result_id as u64)\n");
+                } else if is_postgres {
+                    code.push_str(
+                        "        Ok(0) // Postgres table has no auto-increment column to map\n",
+                    );
                 } else if is_sqlite {
                     code.push_str("        Ok(result.last_insert_rowid() as u64)\n");
                 } else {
@@ -1187,15 +1222,44 @@ message = "Le nom de famille doit faire au moins 5 caractères (Surcharge manuel
                         .collect::<Vec<_>>()
                         .join(", ");
 
+                    let upsert_col_names = upsert_cols
+                        .iter()
+                        .map(|(n, _)| {
+                            if is_postgres {
+                                format!("\"{}\"", n)
+                            } else {
+                                format!("`{}`", n)
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+
+                    let upsert_placeholders = upsert_cols
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| {
+                            if is_postgres {
+                                format!("${}", i + 1)
+                            } else {
+                                "?".to_string()
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+
                     let upsert_sql = if is_postgres || is_sqlite {
                         format!(
                             "INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO UPDATE SET {}",
-                            table_name_q, col_names, placeholders, conflict_keys, update_clauses
+                            table_name_q,
+                            upsert_col_names,
+                            upsert_placeholders,
+                            conflict_keys,
+                            update_clauses
                         )
                     } else {
                         format!(
                             "INSERT INTO {} ({}) VALUES ({}) ON DUPLICATE KEY UPDATE {}",
-                            table_name_q, col_names, placeholders, update_clauses
+                            table_name_q, upsert_col_names, upsert_placeholders, update_clauses
                         )
                     };
 
@@ -1208,7 +1272,7 @@ message = "Le nom de famille doit faire au moins 5 caractères (Surcharge manuel
                         upsert_sql
                     ));
 
-                    for (col_name, _) in &insert_cols {
+                    for (col_name, _) in &upsert_cols {
                         let field = Self::escape_rust_keyword(col_name);
                         code.push_str(&format!("        query = query.bind(&self.{});\n", field));
                     }

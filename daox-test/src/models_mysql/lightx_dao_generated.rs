@@ -29,7 +29,7 @@ impl AppContextFactory {
             global_state: std::sync::Arc::new(lightx::ext::tokio::sync::broadcast::channel(1024).0),
             rate_limiter: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().build()),
             response_cache: std::sync::Arc::new(lightx::ext::moka::sync::Cache::builder().build()),
-            default_pool: sqlx::mysql::MySqlPoolOptions::new().connect(&std::env::var("DEFAULT_DATABASE_URL").or_else(|_| std::env::var("DATABASE_URL")).unwrap_or_else(|_| "mysql://root:root@127.0.0.1:3306/my_database".to_string())).await.map_err(|e| lightx::core::AppError::SystemError { msg: e.to_string(), file: file!(), line: line!() })?,
+            default_pool: sqlx::mysql::MySqlPoolOptions::new().connect(&std::env::var("DEFAULT_DATABASE_URL").or_else(|_| std::env::var("DATABASE_URL")).map_err(|_| lightx::core::AppError::SystemError { msg: "Missing DATABASE_URL configuration".to_string(), file: file!(), line: line!() })?).await.map_err(|e| lightx::core::AppError::SystemError { msg: e.to_string(), file: file!(), line: line!() })?,
         })
     }
 }
@@ -206,7 +206,8 @@ impl Configurations {
 
     /// Upserts the current record (Insert or Update if PK conflicts).
     pub async fn upsert(&self, ctx: &mut RequestContext) -> Result<(), lightx::core::AppError> {
-        let mut query = sqlx::query(r#"INSERT INTO configurations (`match`, `type`, `value`) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE `match` = VALUES(`match`), `type` = VALUES(`type`), `value` = VALUES(`value`)"#);
+        let mut query = sqlx::query(r#"INSERT INTO configurations (`id`, `match`, `type`, `value`) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE `match` = VALUES(`match`), `type` = VALUES(`type`), `value` = VALUES(`value`)"#);
+        query = query.bind(&self.id);
         query = query.bind(&self.r#match);
         query = query.bind(&self.r#type);
         query = query.bind(&self.value);
@@ -1227,10 +1228,11 @@ impl Users {
 
     /// Upserts the current record (Insert or Update if PK conflicts).
     pub async fn upsert(&self, ctx: &mut RequestContext) -> Result<(), lightx::core::AppError> {
-        let mut query = sqlx::query(r#"INSERT INTO users (`created_at`, `email`, `first_name`, `last_name`, `status`) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE `created_at` = VALUES(`created_at`), `email` = VALUES(`email`), `first_name` = VALUES(`first_name`), `last_name` = VALUES(`last_name`), `status` = VALUES(`status`)"#);
+        let mut query = sqlx::query(r#"INSERT INTO users (`created_at`, `email`, `first_name`, `id`, `last_name`, `status`) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE `created_at` = VALUES(`created_at`), `email` = VALUES(`email`), `first_name` = VALUES(`first_name`), `last_name` = VALUES(`last_name`), `status` = VALUES(`status`)"#);
         query = query.bind(&self.created_at);
         query = query.bind(&self.email);
         query = query.bind(&self.first_name);
+        query = query.bind(&self.id);
         query = query.bind(&self.last_name);
         query = query.bind(&self.status);
         if let Some(tx) = ctx.default_tx.as_mut() {
@@ -1441,6 +1443,30 @@ impl Users {
         Ok(())
     }
 
+    /// Retrieves records by index `idx_email`.
+    pub async fn get_by_email(ctx: &mut RequestContext, email: &str) -> Result<Option<Self>, lightx::core::AppError> {
+        let mut query = sqlx::query_as(r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM users WHERE `email` = ?"#);
+        query = query.bind(email);
+        let records = if let Some(tx) = ctx.default_tx.as_mut() {
+            query.fetch_optional(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        } else {
+            query.fetch_optional(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
+        };
+        Ok(records)
+    }
+
+    /// Deletes records matching the index `idx_email`.
+    pub async fn delete_by_email(ctx: &mut RequestContext, email: &str) -> Result<(), lightx::core::AppError> {
+        let mut query = sqlx::query(r#"DELETE FROM users WHERE `email` = ?"#);
+        query = query.bind(email);
+        if let Some(tx) = ctx.default_tx.as_mut() {
+            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        } else {
+            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
+        }
+        Ok(())
+    }
+
     /// Retrieves records by index `idx_name`.
     pub async fn get_by_last_name_and_first_name(ctx: &mut RequestContext, last_name: &str, first_name: &str) -> Result<Vec<Self>, lightx::core::AppError> {
         let mut query = sqlx::query_as(r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM users WHERE `last_name` = ? AND `first_name` = ?"#);
@@ -1474,30 +1500,6 @@ impl Users {
         let mut query = sqlx::query(r#"DELETE FROM users WHERE `last_name` = ? AND `first_name` = ?"#);
         query = query.bind(last_name);
         query = query.bind(first_name);
-        if let Some(tx) = ctx.default_tx.as_mut() {
-            query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
-        } else {
-            query.execute(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
-        }
-        Ok(())
-    }
-
-    /// Retrieves records by index `idx_email`.
-    pub async fn get_by_email(ctx: &mut RequestContext, email: &str) -> Result<Option<Self>, lightx::core::AppError> {
-        let mut query = sqlx::query_as(r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM users WHERE `email` = ?"#);
-        query = query.bind(email);
-        let records = if let Some(tx) = ctx.default_tx.as_mut() {
-            query.fetch_optional(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
-        } else {
-            query.fetch_optional(&ctx.default_pool).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?
-        };
-        Ok(records)
-    }
-
-    /// Deletes records matching the index `idx_email`.
-    pub async fn delete_by_email(ctx: &mut RequestContext, email: &str) -> Result<(), lightx::core::AppError> {
-        let mut query = sqlx::query(r#"DELETE FROM users WHERE `email` = ?"#);
-        query = query.bind(email);
         if let Some(tx) = ctx.default_tx.as_mut() {
             query.execute(&mut **tx).await.map_err(|e: sqlx::Error| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         } else {

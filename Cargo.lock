@@ -367,7 +367,7 @@ dependencies = [
 
 [[package]]
 name = "daox"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "serde",
  "sqlx 0.9.0",
@@ -377,7 +377,7 @@ dependencies = [
 
 [[package]]
 name = "daox-test"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "chrono",
  "daox",
