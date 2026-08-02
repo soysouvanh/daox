@@ -4,7 +4,7 @@ is_unique = false
 columns = ["last_name", "first_name"]
 
 [[indexes]]
-name = "idx_email"
+name = "sqlite_autoindex_users_1"
 is_unique = true
 columns = ["email"]
 

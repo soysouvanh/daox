@@ -1,196 +1,108 @@
-// Code generated automatically by daox. DO NOT EDIT.
-
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct UserRoles {
-    pub user_id: i64,
+    pub assigned_at: Option<chrono::DateTime<chrono::Utc>>,
     pub role_name: String,
-    pub assigned_at: Option<chrono::NaiveDateTime>,
+    pub user_id: i64,
 }
 
+#[allow(clippy::all)]
 impl UserRoles {
-    /// Counts the total number of rows in the table.
-    /// 
-    /// **Note:** On large tables, `COUNT(*)` can be slow. Use it thoughtfully.
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E) -> sqlx::Result<u64> {
-        let query = "SELECT COUNT(*) FROM user_roles";
-        let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
-        Ok(count as u64)
-    }
+let query = "SELECT COUNT(*) FROM user_roles";
+let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
+Ok(count as u64)
+}
 
-    /// Creates a zero-allocation Asynchronous Stream over the entire table.
-    /// 
-    /// **Performance:** This is the absolute best way to process millions of rows.
-    /// Instead of loading all rows into RAM (which would cause out-of-memory crashes),
-    /// the Stream fetches and yields rows one by one directly from the database connection.
     pub fn stream_all<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres> + 'e>(executor: E) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let query = "SELECT * FROM user_roles";
-        sqlx::query_as::<_, Self>(query).fetch(executor)
-    }
+let query = "SELECT \"assigned_at\", \"role_name\", \"user_id\" FROM user_roles ORDER BY \"assigned_at\" ASC";
+sqlx::query_as::<_, Self>(query).fetch(executor)
+}
 
-    /// Classic Offset/Limit pagination with dynamic sorting.
-    /// 
-    /// **SECURITY WARNING:** The `order_by` parameter is NOT bound via prepared statements 
-    /// (SQL does not allow binding column names). You MUST strictly whitelist the user input 
-    /// before passing it here to prevent SQL Injection!
-    /// 
-    /// **Performance:** Offset pagination becomes very slow on deep pages. Consider `list_by_cursor` instead.
     pub async fn list_paginated<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, order_by: &str, page: u32, page_size: u32) -> sqlx::Result<Vec<Self>> {
-        let offset = page.saturating_sub(1) * page_size;
-        let query = format!("SELECT * FROM user_roles ORDER BY {} LIMIT $1 OFFSET $2", order_by);
-        sqlx::query_as::<_, Self>(&query).bind(page_size as i64).bind(offset as i64).fetch_all(executor).await
-    }
-
-    /// Checks if a record exists using the `idx_user_id` index.
-    /// 
-    /// **Performance:** Extremely fast, uses `SELECT 1 ... LIMIT 1`.
-    pub async fn exists_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, user_id: &i64) -> sqlx::Result<bool> {
-        let query = "SELECT 1 FROM user_roles WHERE user_id = $1 LIMIT 1";
-        let exists: Option<(i32,)> = sqlx::query_as(query).bind(user_id).fetch_optional(executor).await?;
-        Ok(exists.is_some())
-    }
-
-    /// Retrieves all records matching the `idx_user_id` index.
-    pub async fn list_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, user_id: &i64) -> sqlx::Result<Vec<Self>> {
-        let query = "SELECT * FROM user_roles WHERE user_id = $1";
-        sqlx::query_as::<_, Self>(query).bind(user_id).fetch_all(executor).await
-    }
-
-    /// Creates a zero-allocation Asynchronous Stream using the `idx_user_id` index.
-    pub fn stream_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres> + 'e>(executor: E, user_id: &i64) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let query = "SELECT * FROM user_roles WHERE user_id = $1";
-        sqlx::query_as::<_, Self>(query).bind(*user_id).fetch(executor)
-    }
-
-    /// Checks if a record exists using the `idx_user_role` index.
-    /// 
-    /// **Performance:** Extremely fast, uses `SELECT 1 ... LIMIT 1`.
-    pub async fn exists_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, user_id: &i64, role_name: &String) -> sqlx::Result<bool> {
-        let query = "SELECT 1 FROM user_roles WHERE user_id = $1 AND role_name = $2 LIMIT 1";
-        let exists: Option<(i32,)> = sqlx::query_as(query).bind(user_id).bind(role_name).fetch_optional(executor).await?;
-        Ok(exists.is_some())
-    }
-
-    /// Retrieves a single record using the unique `idx_user_role` index.
-    pub async fn get_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, user_id: &i64, role_name: &String) -> sqlx::Result<Option<Self>> {
-        let query = "SELECT * FROM user_roles WHERE user_id = $1 AND role_name = $2";
-        sqlx::query_as::<_, Self>(query).bind(user_id).bind(role_name).fetch_optional(executor).await
-    }
-
+const ALLOWED: &[&str] = &["assigned_at", "role_name", "user_id"];
+for part in order_by.split(',') {
+let col = part.trim().trim_end_matches(" ASC").trim_end_matches(" DESC").trim();
+if !ALLOWED.contains(&col) {
+return Err(sqlx::Error::Protocol(format!("Invalid ORDER BY: {}", col).into()));
+}
+}
+let page_size = page_size.clamp(1, 10000);
+let offset = page.saturating_sub(1) * page_size;
+let mut qb: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new("SELECT \"assigned_at\", \"role_name\", \"user_id\" FROM user_roles ORDER BY ");
+qb.push(order_by);
+qb.push(" LIMIT ");
+qb.push_bind(page_size as i64);
+qb.push(" OFFSET ");
+qb.push_bind(offset as i64);
+qb.build_query_as::<Self>().fetch_all(executor).await
 }
 
-impl UserRoles {
-    /// Inserts the current record into the database.
-    /// 
-    /// **Best Practice:** Use this method when you want to create a brand new row.
-    /// If the table has an auto-increment primary key, the database will generate the ID automatically.
-    /// 
-    /// Returns the generated ID (or 0 if the table doesn't have an auto-increment ID).
     pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
-        let query = "INSERT INTO user_roles (user_id, role_name, assigned_at) VALUES ($1, $2, $3)";
-        let result = sqlx::query(query)
-            .bind(self.user_id)
-            .bind(&self.role_name)
-            .bind(self.assigned_at)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
-
-    /// Inserts multiple records in a single network round-trip (Batch Insert).
-    /// 
-    /// **Performance:** This is heavily optimized. Instead of running 100 individual `INSERT` queries,
-    /// this method groups them into one massive `INSERT INTO ... VALUES (...), (...), ...` query.
-    /// Always prefer this method over looping with `.insert()` when saving large amounts of data.
-    /// 
-    /// Returns the number of rows successfully inserted.
-    pub async fn insert_batch<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, items: &[Self]) -> sqlx::Result<u64> {
-        if items.is_empty() { return Ok(0); }
-        let mut query_builder: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new("INSERT INTO user_roles (user_id, role_name, assigned_at) ");
-        query_builder.push_values(items, |mut b, item| {
-            b.push_bind(item.user_id);
-            b.push_bind(&item.role_name);
-            b.push_bind(item.assigned_at);
-        });
-        let result = query_builder.build().execute(executor).await?;
-        Ok(result.rows_affected())
-    }
-
-    /// Inserts the record, or updates it if a unique constraint is violated (Upsert).
-    /// 
-    /// **How it works:** 
-    /// 1. The database attempts to insert the row.
-    /// 2. If a collision occurs (e.g., an email already exists in a UNIQUE index),
-    ///    it automatically updates the existing row with the new data instead of crashing.
-    /// 
-    /// This is highly recommended for data synchronization tasks.
-    pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
-        let query = "INSERT INTO user_roles (user_id, role_name, assigned_at) VALUES ($1, $2, $3) ON CONFLICT (user_id, role_name) DO UPDATE SET user_id = EXCLUDED.user_id, role_name = EXCLUDED.role_name, assigned_at = EXCLUDED.assigned_at";
-        let result = sqlx::query(query)
-            .bind(self.user_id)
-            .bind(&self.role_name)
-            .bind(self.assigned_at)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
-
-    /// Updates records matching the `idx_user_id` index.
-    /// 
-    /// **Warning:** This overwrites all columns (except the index columns) with the values from the current struct.
-    pub async fn update_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
-        let query = "UPDATE user_roles SET role_name = $1, assigned_at = $2 WHERE user_id = $3";
-        let result = sqlx::query(query)
-            .bind(&self.role_name)
-            .bind(self.assigned_at)
-            .bind(self.user_id)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
-
-    /// Deletes records matching the `idx_user_id` index.
-    /// 
-    /// Returns the number of affected rows.
-    pub async fn delete_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, user_id: &i64) -> sqlx::Result<u64> {
-        let query = "DELETE FROM user_roles WHERE user_id = $1";
-        let result = sqlx::query(query)
-            .bind(user_id)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
-
-    /// Updates records matching the `idx_user_role` index.
-    /// 
-    /// **Warning:** This overwrites all columns (except the index columns) with the values from the current struct.
-    pub async fn update_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
-        let query = "UPDATE user_roles SET assigned_at = $1 WHERE user_id = $2 AND role_name = $3";
-        let result = sqlx::query(query)
-            .bind(self.assigned_at)
-            .bind(self.user_id)
-            .bind(&self.role_name)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
-
-    /// Deletes records matching the `idx_user_role` index.
-    /// 
-    /// Returns the number of affected rows.
-    pub async fn delete_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, user_id: &i64, role_name: &String) -> sqlx::Result<u64> {
-        let query = "DELETE FROM user_roles WHERE user_id = $1 AND role_name = $2";
-        let result = sqlx::query(query)
-            .bind(user_id)
-            .bind(role_name)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
-
+let query = "INSERT INTO user_roles (\"assigned_at\", \"role_name\", \"user_id\") VALUES ($1, $2, $3)";
+        let result = sqlx::query::<sqlx::Postgres>(query).bind(&self.assigned_at).bind(&self.role_name).bind(&self.user_id).execute(executor).await?;
+Ok(result.rows_affected())
 }
 
-/// Structure used for partial updates (Patching) of `user_roles`.
-/// 
-/// Each field is wrapped in an `Option`. If a field is `None`, it will be completely ignored during the update.
-/// If it is `Some(value)`, that column will be updated in the database.
-#[derive(Debug, Clone, Default)]
-pub struct UserRolesPatch {
-    pub user_id: Option<i64>,
-    pub role_name: Option<String>,
-    pub assigned_at: Option<Option<chrono::NaiveDateTime>>,
+    /// Inserts a batch of records using Postgres COPY (ultra-fast). 
+/// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
+pub async fn insert_batch<'e>(executor: &mut sqlx::Transaction<'e, sqlx::Postgres>, items: &[Self]) -> sqlx::Result<u64> {
+if items.is_empty() { return Ok(0); }
+let mut copy_in = executor.copy_in_raw("COPY user_roles (\"assigned_at\", \"role_name\", \"user_id\") FROM STDIN WITH (FORMAT csv)").await?;
+for chunk in items.chunks(10000) {
+let mut payload = String::with_capacity(chunk.len() * 128);
+for item in chunk {
+                payload.push_str(&if let Some(v) = &item.assigned_at { format!("\"{}\"", v) } else { String::new() });
+                payload.push(',');
+                payload.push_str(&{ let v = &item.role_name; format!("\"{}\"", v.replace("\"", "\"\"")) });
+                payload.push(',');
+                payload.push_str(&{ let v = &item.user_id; v.to_string() });
+                payload.push('\n');
+}
+copy_in.send(payload.as_bytes()).await?;
+}
+copy_in.finish().await?;
+Ok(items.len() as u64)
+}
+
+    pub async fn list_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, user_id: i64, limit: i64) -> sqlx::Result<Vec<Self>> {
+let query = "SELECT \"assigned_at\", \"role_name\", \"user_id\" FROM user_roles WHERE \"user_id\" = $1 ORDER BY \"assigned_at\" ASC LIMIT $2";
+sqlx::query_as::<_, Self>(query).bind(user_id).bind(limit).fetch_all(executor).await
+}
+
+    pub fn stream_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres> + 'e>(executor: E, user_id: i64) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
+let query = "SELECT \"assigned_at\", \"role_name\", \"user_id\" FROM user_roles WHERE \"user_id\" = $1 ORDER BY \"assigned_at\" ASC";
+sqlx::query_as::<_, Self>(query).bind(user_id).fetch(executor)
+}
+
+    pub async fn exists_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, user_id: i64) -> sqlx::Result<bool> {
+let query = "SELECT 1 FROM user_roles WHERE \"user_id\" = $1 LIMIT 1";
+let exists: Option<(i32,)> = sqlx::query_as(query).bind(user_id).fetch_optional(executor).await?;
+Ok(exists.is_some())
+}
+
+    pub async fn delete_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, user_id: i64) -> sqlx::Result<u64> {
+let query = "DELETE FROM user_roles WHERE \"user_id\" = $1";
+let result = sqlx::query::<sqlx::Postgres>(query).bind(user_id).execute(executor).await?;
+Ok(result.rows_affected())
+}
+
+    pub async fn get_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, user_id: i64, role_name: &String) -> sqlx::Result<Option<Self>> {
+let query = "SELECT \"assigned_at\", \"role_name\", \"user_id\" FROM user_roles WHERE \"user_id\" = $1 AND \"role_name\" = $2";
+sqlx::query_as::<_, Self>(query).bind(user_id).bind(role_name).fetch_optional(executor).await
+}
+
+    pub async fn exists_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, user_id: i64, role_name: &String) -> sqlx::Result<bool> {
+let query = "SELECT 1 FROM user_roles WHERE \"user_id\" = $1 AND \"role_name\" = $2 LIMIT 1";
+let exists: Option<(i32,)> = sqlx::query_as(query).bind(user_id).bind(role_name).fetch_optional(executor).await?;
+Ok(exists.is_some())
+}
+
+    pub async fn delete_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, user_id: i64, role_name: &String) -> sqlx::Result<u64> {
+let query = "DELETE FROM user_roles WHERE \"user_id\" = $1 AND \"role_name\" = $2";
+let result = sqlx::query::<sqlx::Postgres>(query).bind(user_id).bind(role_name).execute(executor).await?;
+Ok(result.rows_affected())
+}
+
 }
 

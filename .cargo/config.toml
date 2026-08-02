@@ -1,0 +1,3 @@
+[env]
+DATABASE_URL_MYSQL = "mysql://root:root@localhost:3307/daox_test"
+DATABASE_URL_PG = "postgres://root:root@localhost:5433/daox_test"

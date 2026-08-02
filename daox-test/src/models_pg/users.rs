@@ -1,338 +1,220 @@
-// Code generated automatically by daox. DO NOT EDIT.
-
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Users {
-    pub id: i64,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
     pub email: String,
     pub first_name: Option<String>,
+    pub id: i64,
     pub last_name: String,
     pub status: String,
-    pub created_at: Option<chrono::NaiveDateTime>,
 }
 
+#[allow(clippy::all)]
 impl Users {
-    /// Counts the total number of rows in the table.
-    /// 
-    /// **Note:** On large tables, `COUNT(*)` can be slow. Use it thoughtfully.
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E) -> sqlx::Result<u64> {
-        let query = "SELECT COUNT(*) FROM users";
-        let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
-        Ok(count as u64)
-    }
-
-    /// Creates a zero-allocation Asynchronous Stream over the entire table.
-    /// 
-    /// **Performance:** This is the absolute best way to process millions of rows.
-    /// Instead of loading all rows into RAM (which would cause out-of-memory crashes),
-    /// the Stream fetches and yields rows one by one directly from the database connection.
-    pub fn stream_all<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres> + 'e>(executor: E) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let query = "SELECT * FROM users";
-        sqlx::query_as::<_, Self>(query).fetch(executor)
-    }
-
-    /// Classic Offset/Limit pagination with dynamic sorting.
-    /// 
-    /// **SECURITY WARNING:** The `order_by` parameter is NOT bound via prepared statements 
-    /// (SQL does not allow binding column names). You MUST strictly whitelist the user input 
-    /// before passing it here to prevent SQL Injection!
-    /// 
-    /// **Performance:** Offset pagination becomes very slow on deep pages. Consider `list_by_cursor` instead.
-    pub async fn list_paginated<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, order_by: &str, page: u32, page_size: u32) -> sqlx::Result<Vec<Self>> {
-        let offset = page.saturating_sub(1) * page_size;
-        let query = format!("SELECT * FROM users ORDER BY {} LIMIT $1 OFFSET $2", order_by);
-        sqlx::query_as::<_, Self>(&query).bind(page_size as i64).bind(offset as i64).fetch_all(executor).await
-    }
-
-    /// Retrieves a single record using its Primary Key.
-    /// 
-    /// Returns `Some(Self)` if the record exists, or `None` if it does not.
-    pub async fn get_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, id: &i64) -> sqlx::Result<Option<Self>> {
-        let query = "SELECT * FROM users WHERE id = $1";
-        sqlx::query_as::<_, Self>(query)
-            .bind(id)
-            .fetch_optional(executor).await
-    }
-
-    /// Checks if a record exists using its Primary Key.
-    /// 
-    /// **Performance:** This uses a `SELECT 1 ... LIMIT 1` query. It is infinitely faster 
-    /// and lighter than `get_by_pk` when you only need to check for existence, because it avoids 
-    /// transferring and deserializing the full row data.
-    pub async fn exists_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, id: &i64) -> sqlx::Result<bool> {
-        let query = "SELECT 1 FROM users WHERE id = $1 LIMIT 1";
-        let exists: Option<(i32,)> = sqlx::query_as(query)
-            .bind(id)
-            .fetch_optional(executor).await?;
-        Ok(exists.is_some())
-    }
-
-    /// Cursor-based Pagination (Keyset Pagination).
-    /// 
-    /// **Performance:** This is the SOTA (State of the Art) standard for pagination.
-    /// Unlike `OFFSET` which scans and discards thousands of rows, this jumps immediately to the 
-    /// correct row using the B-Tree index, offering O(1) constant-time absolute performance.
-    pub async fn list_by_cursor<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, last_id: &i64, limit: u32) -> sqlx::Result<Vec<Self>> {
-        let query = "SELECT * FROM users WHERE id > $1 ORDER BY id ASC LIMIT $2";
-        sqlx::query_as::<_, Self>(query).bind(last_id).bind(limit as i64).fetch_all(executor).await
-    }
-
-    /// Checks if a record exists using the `idx_email` index.
-    /// 
-    /// **Performance:** Extremely fast, uses `SELECT 1 ... LIMIT 1`.
-    pub async fn exists_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, email: &String) -> sqlx::Result<bool> {
-        let query = "SELECT 1 FROM users WHERE email = $1 LIMIT 1";
-        let exists: Option<(i32,)> = sqlx::query_as(query).bind(email).fetch_optional(executor).await?;
-        Ok(exists.is_some())
-    }
-
-    /// Retrieves a single record using the unique `idx_email` index.
-    pub async fn get_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, email: &String) -> sqlx::Result<Option<Self>> {
-        let query = "SELECT * FROM users WHERE email = $1";
-        sqlx::query_as::<_, Self>(query).bind(email).fetch_optional(executor).await
-    }
-
-    /// Checks if a record exists using the `idx_name` index.
-    /// 
-    /// **Performance:** Extremely fast, uses `SELECT 1 ... LIMIT 1`.
-    pub async fn exists_by_last_name_and_first_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, last_name: &String, first_name: &Option<String>) -> sqlx::Result<bool> {
-        let query = "SELECT 1 FROM users WHERE last_name = $1 AND first_name = $2 LIMIT 1";
-        let exists: Option<(i32,)> = sqlx::query_as(query).bind(last_name).bind(first_name).fetch_optional(executor).await?;
-        Ok(exists.is_some())
-    }
-
-    /// Retrieves all records matching the `idx_name` index.
-    pub async fn list_by_last_name_and_first_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, last_name: &String, first_name: &Option<String>) -> sqlx::Result<Vec<Self>> {
-        let query = "SELECT * FROM users WHERE last_name = $1 AND first_name = $2";
-        sqlx::query_as::<_, Self>(query).bind(last_name).bind(first_name).fetch_all(executor).await
-    }
-
-    /// Creates a zero-allocation Asynchronous Stream using the `idx_name` index.
-    pub fn stream_by_last_name_and_first_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres> + 'e>(executor: E, last_name: &String, first_name: &Option<String>) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let query = "SELECT * FROM users WHERE last_name = $1 AND first_name = $2";
-        sqlx::query_as::<_, Self>(query).bind(last_name.clone()).bind(first_name.clone()).fetch(executor)
-    }
-
+let query = "SELECT COUNT(*) FROM users";
+let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
+Ok(count as u64)
 }
 
-impl Users {
-    /// Inserts the current record into the database.
-    /// 
-    /// **Best Practice:** Use this method when you want to create a brand new row.
-    /// If the table has an auto-increment primary key, the database will generate the ID automatically.
-    /// 
-    /// Returns the generated ID (or 0 if the table doesn't have an auto-increment ID).
-    pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
-        let query = "INSERT INTO users (email, first_name, last_name, status, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING id::bigint";
-        let (id,): (i64,) = sqlx::query_as(query)
-            .bind(&self.email)
-            .bind(&self.first_name)
-            .bind(&self.last_name)
-            .bind(&self.status)
-            .bind(self.created_at)
-            .fetch_one(executor).await?;
-        Ok(id as u64)
-    }
+    pub fn stream_all<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres> + 'e>(executor: E) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
+let query = "SELECT \"created_at\", \"email\", \"first_name\", \"id\", \"last_name\", \"status\" FROM users ORDER BY \"id\" ASC";
+sqlx::query_as::<_, Self>(query).fetch(executor)
+}
 
-    /// Inserts multiple records in a single network round-trip (Batch Insert).
-    /// 
-    /// **Performance:** This is heavily optimized. Instead of running 100 individual `INSERT` queries,
-    /// this method groups them into one massive `INSERT INTO ... VALUES (...), (...), ...` query.
-    /// Always prefer this method over looping with `.insert()` when saving large amounts of data.
-    /// 
-    /// Returns the number of rows successfully inserted.
-    pub async fn insert_batch<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, items: &[Self]) -> sqlx::Result<u64> {
-        if items.is_empty() { return Ok(0); }
-        let mut query_builder: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new("INSERT INTO users (email, first_name, last_name, status, created_at) ");
-        query_builder.push_values(items, |mut b, item| {
+    pub async fn get_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, id: i64) -> sqlx::Result<Option<Self>> {
+let query = "SELECT \"created_at\", \"email\", \"first_name\", \"id\", \"last_name\", \"status\" FROM users WHERE \"id\" = $1";
+sqlx::query_as::<_, Self>(query).bind(id).fetch_optional(executor).await
+}
+
+    pub async fn exists_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, id: i64) -> sqlx::Result<bool> {
+let query = "SELECT 1 FROM users WHERE \"id\" = $1 LIMIT 1";
+let exists: Option<(i32,)> = sqlx::query_as(query).bind(id).fetch_optional(executor).await?;
+Ok(exists.is_some())
+}
+
+    pub async fn list_by_cursor<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, last_id: i64, limit: u32) -> sqlx::Result<Vec<Self>> {
+let query = "SELECT \"created_at\", \"email\", \"first_name\", \"id\", \"last_name\", \"status\" FROM users WHERE \"id\" > $1 ORDER BY \"id\" ASC LIMIT $2";
+sqlx::query_as::<_, Self>(query).bind(last_id).bind(limit as i64).fetch_all(executor).await
+}
+
+    pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
+let query = "INSERT INTO users (\"created_at\", \"email\", \"first_name\", \"last_name\", \"status\") VALUES ($1, $2, $3, $4, $5) RETURNING \"id\"::bigint";
+        let (id,): (i64,) = sqlx::query_as(query).bind(&self.created_at).bind(&self.email).bind(&self.first_name).bind(&self.last_name).bind(&self.status).fetch_one(executor).await?;
+Ok(id as u64)
+}
+
+    /// Inserts a batch of records using Postgres COPY (ultra-fast). 
+/// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
+pub async fn insert_batch<'e>(executor: &mut sqlx::Transaction<'e, sqlx::Postgres>, items: &[Self]) -> sqlx::Result<u64> {
+if items.is_empty() { return Ok(0); }
+let mut copy_in = executor.copy_in_raw("COPY users (\"created_at\", \"email\", \"first_name\", \"last_name\", \"status\") FROM STDIN WITH (FORMAT csv)").await?;
+for chunk in items.chunks(10000) {
+let mut payload = String::with_capacity(chunk.len() * 128);
+for item in chunk {
+                payload.push_str(&if let Some(v) = &item.created_at { format!("\"{}\"", v) } else { String::new() });
+                payload.push(',');
+                payload.push_str(&{ let v = &item.email; format!("\"{}\"", v.replace("\"", "\"\"")) });
+                payload.push(',');
+                payload.push_str(&if let Some(v) = &item.first_name { format!("\"{}\"", v.replace("\"", "\"\"")) } else { String::new() });
+                payload.push(',');
+                payload.push_str(&{ let v = &item.last_name; format!("\"{}\"", v.replace("\"", "\"\"")) });
+                payload.push(',');
+                payload.push_str(&{ let v = &item.status; format!("\"{}\"", v.replace("\"", "\"\"")) });
+                payload.push('\n');
+}
+copy_in.send(payload.as_bytes()).await?;
+}
+copy_in.finish().await?;
+Ok(items.len() as u64)
+}
+
+    pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
+let query = "INSERT INTO users (\"created_at\", \"email\", \"first_name\", \"last_name\", \"status\") VALUES ($1, $2, $3, $4, $5) ON CONFLICT (\"id\") DO UPDATE SET \"created_at\" = EXCLUDED.\"created_at\", \"email\" = EXCLUDED.\"email\", \"first_name\" = EXCLUDED.\"first_name\", \"last_name\" = EXCLUDED.\"last_name\", \"status\" = EXCLUDED.\"status\"";
+let result = sqlx::query::<sqlx::Postgres>(query).bind(&self.created_at).bind(&self.email).bind(&self.first_name).bind(&self.last_name).bind(&self.status).execute(executor).await?;
+Ok(result.rows_affected())
+}
+
+    /// Upserts a batch of records. 
+/// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
+pub async fn upsert_batch<'e>(executor: &mut sqlx::Transaction<'e, sqlx::Postgres>, items: &[Self]) -> sqlx::Result<u64> {
+if items.is_empty() { return Ok(0); }
+let chunk_size = 65535 / 5;
+let mut total_affected = 0;
+for chunk in items.chunks(chunk_size.max(1)) {
+let mut qb: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new("INSERT INTO users (\"created_at\", \"email\", \"first_name\", \"last_name\", \"status\") ");
+qb.push_values(chunk, |mut b, item| {
+            b.push_bind(&item.created_at);
             b.push_bind(&item.email);
             b.push_bind(&item.first_name);
             b.push_bind(&item.last_name);
             b.push_bind(&item.status);
-            b.push_bind(item.created_at);
-        });
-        let result = query_builder.build().execute(executor).await?;
-        Ok(result.rows_affected())
-    }
+            });
+qb.push(" ON CONFLICT (\"id\") DO UPDATE SET \"created_at\" = EXCLUDED.\"created_at\", \"email\" = EXCLUDED.\"email\", \"first_name\" = EXCLUDED.\"first_name\", \"last_name\" = EXCLUDED.\"last_name\", \"status\" = EXCLUDED.\"status\"");
+let result = qb.build().execute(&mut **executor).await?;
+total_affected += result.rows_affected();
+}
+Ok(total_affected)
+}
 
-    /// Inserts the record, or updates it if a unique constraint is violated (Upsert).
-    /// 
-    /// **How it works:** 
-    /// 1. The database attempts to insert the row.
-    /// 2. If a collision occurs (e.g., an email already exists in a UNIQUE index),
-    ///    it automatically updates the existing row with the new data instead of crashing.
-    /// 
-    /// This is highly recommended for data synchronization tasks.
-    pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
-        let query = "INSERT INTO users (email, first_name, last_name, status, created_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email, first_name = EXCLUDED.first_name, last_name = EXCLUDED.last_name, status = EXCLUDED.status, created_at = EXCLUDED.created_at";
-        let result = sqlx::query(query)
-            .bind(&self.email)
-            .bind(&self.first_name)
-            .bind(&self.last_name)
-            .bind(&self.status)
-            .bind(self.created_at)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
+    pub async fn update_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
+let query_str = "UPDATE users SET \"created_at\" = $1, \"email\" = $2, \"first_name\" = $3, \"last_name\" = $4, \"status\" = $5 WHERE \"id\" = $6";
+let mut query = sqlx::query::<sqlx::Postgres>(query_str);
+        query = query.bind(&self.created_at);
+        query = query.bind(&self.email);
+        query = query.bind(&self.first_name);
+        query = query.bind(&self.last_name);
+        query = query.bind(&self.status);
+        query = query.bind(&self.id);
+let result = query.execute(executor).await?;
+Ok(result.rows_affected())
+}
 
-    /// Overwrites the entire record in the database using its Primary Key.
-    /// 
-    /// **Warning:** This will update ALL columns in the row with the values in the current struct.
-    /// If you only want to update one or two specific columns, use `update_partial_by_pk` instead 
-    /// to save network bandwidth and database disk I/O.
-    pub async fn update_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
-        let query = "UPDATE users SET email = $1, first_name = $2, last_name = $3, status = $4, created_at = $5 WHERE id = $6";
-        let result = sqlx::query(query)
-            .bind(&self.email)
-            .bind(&self.first_name)
-            .bind(&self.last_name)
-            .bind(&self.status)
-            .bind(self.created_at)
-            .bind(self.id)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
+    pub async fn delete_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, id: i64) -> sqlx::Result<u64> {
+let query = "DELETE FROM users WHERE \"id\" = $1";
+let result = sqlx::query::<sqlx::Postgres>(query).bind(id).execute(executor).await?;
+Ok(result.rows_affected())
+}
 
-    /// Deletes the specific record from the database using its Primary Key.
-    /// 
-    /// Returns the number of affected rows (1 if deleted, 0 if it didn't exist).
-    pub async fn delete_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, id: &i64) -> sqlx::Result<u64> {
-        let query = "DELETE FROM users WHERE id = $1";
-        let result = sqlx::query(query)
-            .bind(id)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
+    pub async fn delete_many_by_id<'e>(executor: &mut sqlx::Transaction<'e, sqlx::Postgres>, ids: &[i64]) -> sqlx::Result<u64> {
+if ids.is_empty() { return Ok(0); }
+let mut total_affected = 0;
+for chunk in ids.chunks(65535) {
+let mut qb: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new("DELETE FROM users WHERE \"id\" IN ");
+qb.push("(");
+let mut sep = qb.separated(", ");
+for id in chunk { sep.push_bind(id); }
+sep.push_unseparated(")");
+let result = qb.build().execute(&mut **executor).await?;
+total_affected += result.rows_affected();
+}
+Ok(total_affected)
+}
 
-    /// Deletes multiple records in a single query using an `IN (...)` clause.
-    /// 
-    /// **Performance:** This is the most efficient way to delete a batch of specific IDs.
-    /// Returns the total number of rows successfully deleted.
-    pub async fn delete_many_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, ids: &[i64]) -> sqlx::Result<u64> {
-        if ids.is_empty() { return Ok(0); }
-        let mut query_builder: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new("DELETE FROM users WHERE id IN ");
-        query_builder.push("(");
-        let mut separated = query_builder.separated(", ");
-        for id in ids { separated.push_bind(id); }
-        separated.push_unseparated(")");
-        let result = query_builder.build().execute(executor).await?;
-        Ok(result.rows_affected())
-    }
+    pub async fn update_partial_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, id: i64, patch: &UsersPatch) -> sqlx::Result<u64> {
+let mut qb: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new("UPDATE users SET ");
+let mut has = false;
+let mut sep = qb.separated(", ");
+        if let Some(val) = &patch.created_at {
+has = true;
+sep.push("\"created_at\" = ");
+sep.push_bind_unseparated(val);
+}
+        if let Some(val) = &patch.email {
+has = true;
+sep.push("\"email\" = ");
+sep.push_bind_unseparated(val);
+}
+        if let Some(val) = &patch.first_name {
+has = true;
+sep.push("\"first_name\" = ");
+sep.push_bind_unseparated(val);
+}
+        if let Some(val) = &patch.last_name {
+has = true;
+sep.push("\"last_name\" = ");
+sep.push_bind_unseparated(val);
+}
+        if let Some(val) = &patch.status {
+has = true;
+sep.push("\"status\" = ");
+sep.push_bind_unseparated(val);
+}
+        if !has { return Ok(0); }
+        qb.push(" WHERE \"id\" = ");
+qb.push_bind(id);
+        let result = qb.build().execute(executor).await?;
+Ok(result.rows_affected())
+}
 
-    /// Updates records matching the `idx_email` index.
-    /// 
-    /// **Warning:** This overwrites all columns (except the index columns) with the values from the current struct.
-    pub async fn update_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
-        let query = "UPDATE users SET first_name = $1, last_name = $2, status = $3, created_at = $4 WHERE email = $5";
-        let result = sqlx::query(query)
-            .bind(&self.first_name)
-            .bind(&self.last_name)
-            .bind(&self.status)
-            .bind(self.created_at)
-            .bind(&self.email)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
+    pub async fn get_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, email: &String) -> sqlx::Result<Option<Self>> {
+let query = "SELECT \"created_at\", \"email\", \"first_name\", \"id\", \"last_name\", \"status\" FROM users WHERE \"email\" = $1";
+sqlx::query_as::<_, Self>(query).bind(email).fetch_optional(executor).await
+}
 
-    /// Deletes records matching the `idx_email` index.
-    /// 
-    /// Returns the number of affected rows.
+    pub async fn exists_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, email: &String) -> sqlx::Result<bool> {
+let query = "SELECT 1 FROM users WHERE \"email\" = $1 LIMIT 1";
+let exists: Option<(i32,)> = sqlx::query_as(query).bind(email).fetch_optional(executor).await?;
+Ok(exists.is_some())
+}
+
     pub async fn delete_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, email: &String) -> sqlx::Result<u64> {
-        let query = "DELETE FROM users WHERE email = $1";
-        let result = sqlx::query(query)
-            .bind(email)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
+let query = "DELETE FROM users WHERE \"email\" = $1";
+let result = sqlx::query::<sqlx::Postgres>(query).bind(email).execute(executor).await?;
+Ok(result.rows_affected())
+}
 
-    /// Updates records matching the `idx_name` index.
-    /// 
-    /// **Warning:** This overwrites all columns (except the index columns) with the values from the current struct.
-    pub async fn update_by_last_name_and_first_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
-        let query = "UPDATE users SET email = $1, status = $2, created_at = $3 WHERE last_name = $4 AND first_name = $5";
-        let result = sqlx::query(query)
-            .bind(&self.email)
-            .bind(&self.status)
-            .bind(self.created_at)
-            .bind(&self.last_name)
-            .bind(&self.first_name)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
+    pub async fn list_by_first_name_and_last_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, first_name: &String, last_name: &String, limit: i64) -> sqlx::Result<Vec<Self>> {
+let query = "SELECT \"created_at\", \"email\", \"first_name\", \"id\", \"last_name\", \"status\" FROM users WHERE \"first_name\" = $1 AND \"last_name\" = $2 ORDER BY \"id\" ASC LIMIT $3";
+sqlx::query_as::<_, Self>(query).bind(first_name).bind(last_name).bind(limit).fetch_all(executor).await
+}
 
-    /// Deletes records matching the `idx_name` index.
-    /// 
-    /// Returns the number of affected rows.
-    pub async fn delete_by_last_name_and_first_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, last_name: &String, first_name: &Option<String>) -> sqlx::Result<u64> {
-        let query = "DELETE FROM users WHERE last_name = $1 AND first_name = $2";
-        let result = sqlx::query(query)
-            .bind(last_name)
-            .bind(first_name)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
+    pub fn stream_by_first_name_and_last_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres> + 'e>(executor: E, first_name: &'e String, last_name: &'e String) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
+let query = "SELECT \"created_at\", \"email\", \"first_name\", \"id\", \"last_name\", \"status\" FROM users WHERE \"first_name\" = $1 AND \"last_name\" = $2 ORDER BY \"id\" ASC";
+sqlx::query_as::<_, Self>(query).bind(first_name).bind(last_name).fetch(executor)
+}
+
+    pub async fn exists_by_first_name_and_last_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, first_name: &String, last_name: &String) -> sqlx::Result<bool> {
+let query = "SELECT 1 FROM users WHERE \"first_name\" = $1 AND \"last_name\" = $2 LIMIT 1";
+let exists: Option<(i32,)> = sqlx::query_as(query).bind(first_name).bind(last_name).fetch_optional(executor).await?;
+Ok(exists.is_some())
+}
+
+    pub async fn delete_by_first_name_and_last_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, first_name: &String, last_name: &String) -> sqlx::Result<u64> {
+let query = "DELETE FROM users WHERE \"first_name\" = $1 AND \"last_name\" = $2";
+let result = sqlx::query::<sqlx::Postgres>(query).bind(first_name).bind(last_name).execute(executor).await?;
+Ok(result.rows_affected())
+}
 
 }
 
-/// Structure used for partial updates (Patching) of `users`.
-/// 
-/// Each field is wrapped in an `Option`. If a field is `None`, it will be completely ignored during the update.
-/// If it is `Some(value)`, that column will be updated in the database.
+#[allow(clippy::all)]
 #[derive(Debug, Clone, Default)]
 pub struct UsersPatch {
+    pub created_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
     pub email: Option<String>,
     pub first_name: Option<Option<String>>,
     pub last_name: Option<String>,
     pub status: Option<String>,
-    pub created_at: Option<Option<chrono::NaiveDateTime>>,
-}
-
-impl Users {
-    /// Updates ONLY the columns that contain data in the `patch` struct.
-    /// 
-    /// **Performance:** This is the most optimized way to update data.
-    /// It dynamically builds the SQL query to only include the changed columns, which saves network bandwidth
-    /// and significantly reduces database disk I/O (WAL logging) compared to a full row update.
-    pub async fn update_partial_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, id: &i64, patch: &UsersPatch) -> sqlx::Result<u64> {
-        let mut query_builder: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new("UPDATE users SET ");
-        let mut has_fields = false;
-        let mut separated = query_builder.separated(", ");
-
-        if let Some(val) = &patch.email {
-            has_fields = true;
-            separated.push("email = ");
-            separated.push_bind_unseparated(val.clone());
-        }
-        if let Some(val) = &patch.first_name {
-            has_fields = true;
-            separated.push("first_name = ");
-            separated.push_bind_unseparated(val.clone());
-        }
-        if let Some(val) = &patch.last_name {
-            has_fields = true;
-            separated.push("last_name = ");
-            separated.push_bind_unseparated(val.clone());
-        }
-        if let Some(val) = &patch.status {
-            has_fields = true;
-            separated.push("status = ");
-            separated.push_bind_unseparated(val.clone());
-        }
-        if let Some(val) = &patch.created_at {
-            has_fields = true;
-            separated.push("created_at = ");
-            separated.push_bind_unseparated(*val);
-        }
-
-        if !has_fields {
-            // Si le patch est vide, on économise un aller-retour réseau
-            return Ok(0);
-        }
-
-        query_builder.push(" WHERE id = ");
-        query_builder.push_bind(*id);
-
-        let result = query_builder.build().execute(executor).await?;
-        Ok(result.rows_affected())
-    }
 }
 

@@ -1,230 +1,162 @@
-// Code generated automatically by daox. DO NOT EDIT.
-
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ProductMetadata {
-    pub id: String,
+    pub attributes: Option<serde_json::Value>,
     pub category: String,
-    pub attributes: Option<String>,
+    pub id: String,
     pub raw_data: Option<Vec<u8>>,
 }
 
+#[allow(clippy::all)]
 impl ProductMetadata {
-    /// Counts the total number of rows in the table.
-    /// 
-    /// **Note:** On large tables, `COUNT(*)` can be slow. Use it thoughtfully.
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E) -> sqlx::Result<u64> {
-        let query = "SELECT COUNT(*) FROM product_metadata";
-        let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
-        Ok(count as u64)
-    }
+let query = "SELECT COUNT(*) FROM product_metadata";
+let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
+Ok(count as u64)
+}
 
-    /// Creates a zero-allocation Asynchronous Stream over the entire table.
-    /// 
-    /// **Performance:** This is the absolute best way to process millions of rows.
-    /// Instead of loading all rows into RAM (which would cause out-of-memory crashes),
-    /// the Stream fetches and yields rows one by one directly from the database connection.
     pub fn stream_all<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres> + 'e>(executor: E) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let query = "SELECT * FROM product_metadata";
-        sqlx::query_as::<_, Self>(query).fetch(executor)
-    }
-
-    /// Classic Offset/Limit pagination with dynamic sorting.
-    /// 
-    /// **SECURITY WARNING:** The `order_by` parameter is NOT bound via prepared statements 
-    /// (SQL does not allow binding column names). You MUST strictly whitelist the user input 
-    /// before passing it here to prevent SQL Injection!
-    /// 
-    /// **Performance:** Offset pagination becomes very slow on deep pages. Consider `list_by_cursor` instead.
-    pub async fn list_paginated<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, order_by: &str, page: u32, page_size: u32) -> sqlx::Result<Vec<Self>> {
-        let offset = page.saturating_sub(1) * page_size;
-        let query = format!("SELECT * FROM product_metadata ORDER BY {} LIMIT $1 OFFSET $2", order_by);
-        sqlx::query_as::<_, Self>(&query).bind(page_size as i64).bind(offset as i64).fetch_all(executor).await
-    }
-
-    /// Retrieves a single record using its Primary Key.
-    /// 
-    /// Returns `Some(Self)` if the record exists, or `None` if it does not.
-    pub async fn get_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, id: &String) -> sqlx::Result<Option<Self>> {
-        let query = "SELECT * FROM product_metadata WHERE id = $1";
-        sqlx::query_as::<_, Self>(query)
-            .bind(id)
-            .fetch_optional(executor).await
-    }
-
-    /// Checks if a record exists using its Primary Key.
-    /// 
-    /// **Performance:** This uses a `SELECT 1 ... LIMIT 1` query. It is infinitely faster 
-    /// and lighter than `get_by_pk` when you only need to check for existence, because it avoids 
-    /// transferring and deserializing the full row data.
-    pub async fn exists_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, id: &String) -> sqlx::Result<bool> {
-        let query = "SELECT 1 FROM product_metadata WHERE id = $1 LIMIT 1";
-        let exists: Option<(i32,)> = sqlx::query_as(query)
-            .bind(id)
-            .fetch_optional(executor).await?;
-        Ok(exists.is_some())
-    }
-
-    /// Cursor-based Pagination (Keyset Pagination).
-    /// 
-    /// **Performance:** This is the SOTA (State of the Art) standard for pagination.
-    /// Unlike `OFFSET` which scans and discards thousands of rows, this jumps immediately to the 
-    /// correct row using the B-Tree index, offering O(1) constant-time absolute performance.
-    pub async fn list_by_cursor<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, last_id: &String, limit: u32) -> sqlx::Result<Vec<Self>> {
-        let query = "SELECT * FROM product_metadata WHERE id > $1 ORDER BY id ASC LIMIT $2";
-        sqlx::query_as::<_, Self>(query).bind(last_id).bind(limit as i64).fetch_all(executor).await
-    }
-
+let query = "SELECT \"attributes\", \"category\", \"id\", \"raw_data\" FROM product_metadata ORDER BY \"id\" ASC";
+sqlx::query_as::<_, Self>(query).fetch(executor)
 }
 
-impl ProductMetadata {
-    /// Inserts the current record into the database.
-    /// 
-    /// **Best Practice:** Use this method when you want to create a brand new row.
-    /// If the table has an auto-increment primary key, the database will generate the ID automatically.
-    /// 
-    /// Returns the generated ID (or 0 if the table doesn't have an auto-increment ID).
+    pub async fn get_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, id: &str) -> sqlx::Result<Option<Self>> {
+let query = "SELECT \"attributes\", \"category\", \"id\", \"raw_data\" FROM product_metadata WHERE \"id\" = $1";
+sqlx::query_as::<_, Self>(query).bind(id).fetch_optional(executor).await
+}
+
+    pub async fn exists_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, id: &str) -> sqlx::Result<bool> {
+let query = "SELECT 1 FROM product_metadata WHERE \"id\" = $1 LIMIT 1";
+let exists: Option<(i32,)> = sqlx::query_as(query).bind(id).fetch_optional(executor).await?;
+Ok(exists.is_some())
+}
+
+    pub async fn list_by_cursor<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, last_id: &str, limit: u32) -> sqlx::Result<Vec<Self>> {
+let query = "SELECT \"attributes\", \"category\", \"id\", \"raw_data\" FROM product_metadata WHERE \"id\" > $1 ORDER BY \"id\" ASC LIMIT $2";
+sqlx::query_as::<_, Self>(query).bind(last_id).bind(limit as i64).fetch_all(executor).await
+}
+
     pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
-        let query = "INSERT INTO product_metadata (id, category, attributes, raw_data) VALUES ($1, $2, $3, $4)";
-        let result = sqlx::query(query)
-            .bind(&self.id)
-            .bind(&self.category)
-            .bind(&self.attributes)
-            .bind(&self.raw_data)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
+let query = "INSERT INTO product_metadata (\"attributes\", \"category\", \"id\", \"raw_data\") VALUES ($1, $2, $3, $4)";
+        let result = sqlx::query::<sqlx::Postgres>(query).bind(&self.attributes).bind(&self.category).bind(&self.id).bind(&self.raw_data).execute(executor).await?;
+Ok(result.rows_affected())
+}
 
-    /// Inserts multiple records in a single network round-trip (Batch Insert).
-    /// 
-    /// **Performance:** This is heavily optimized. Instead of running 100 individual `INSERT` queries,
-    /// this method groups them into one massive `INSERT INTO ... VALUES (...), (...), ...` query.
-    /// Always prefer this method over looping with `.insert()` when saving large amounts of data.
-    /// 
-    /// Returns the number of rows successfully inserted.
-    pub async fn insert_batch<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, items: &[Self]) -> sqlx::Result<u64> {
-        if items.is_empty() { return Ok(0); }
-        let mut query_builder: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new("INSERT INTO product_metadata (id, category, attributes, raw_data) ");
-        query_builder.push_values(items, |mut b, item| {
-            b.push_bind(&item.id);
-            b.push_bind(&item.category);
-            b.push_bind(&item.attributes);
-            b.push_bind(&item.raw_data);
-        });
-        let result = query_builder.build().execute(executor).await?;
-        Ok(result.rows_affected())
-    }
+    /// Inserts a batch of records using Postgres COPY (ultra-fast). 
+/// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
+pub async fn insert_batch<'e>(executor: &mut sqlx::Transaction<'e, sqlx::Postgres>, items: &[Self]) -> sqlx::Result<u64> {
+if items.is_empty() { return Ok(0); }
+let mut copy_in = executor.copy_in_raw("COPY product_metadata (\"attributes\", \"category\", \"id\", \"raw_data\") FROM STDIN WITH (FORMAT csv)").await?;
+for chunk in items.chunks(10000) {
+let mut payload = String::with_capacity(chunk.len() * 128);
+for item in chunk {
+                payload.push_str(&if let Some(v) = &item.attributes { format!("\"{}\"", v.to_string().replace("\"", "\"\"")) } else { String::new() });
+                payload.push(',');
+                payload.push_str(&{ let v = &item.category; format!("\"{}\"", v.replace("\"", "\"\"")) });
+                payload.push(',');
+                payload.push_str(&{ let v = &item.id; format!("\"{}\"", v.replace("\"", "\"\"")) });
+                payload.push(',');
+                payload.push_str(&if let Some(v) = &item.raw_data { format!("\\\\x{}", v.iter().fold(String::new(), |mut acc, b| { std::fmt::Write::write_fmt(&mut acc, format_args!("{:02x}", b)).ok(); acc })) } else { String::new() });
+                payload.push('\n');
+}
+copy_in.send(payload.as_bytes()).await?;
+}
+copy_in.finish().await?;
+Ok(items.len() as u64)
+}
 
-    /// Inserts the record, or updates it if a unique constraint is violated (Upsert).
-    /// 
-    /// **How it works:** 
-    /// 1. The database attempts to insert the row.
-    /// 2. If a collision occurs (e.g., an email already exists in a UNIQUE index),
-    ///    it automatically updates the existing row with the new data instead of crashing.
-    /// 
-    /// This is highly recommended for data synchronization tasks.
     pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
-        let query = "INSERT INTO product_metadata (id, category, attributes, raw_data) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO UPDATE SET id = EXCLUDED.id, category = EXCLUDED.category, attributes = EXCLUDED.attributes, raw_data = EXCLUDED.raw_data";
-        let result = sqlx::query(query)
-            .bind(&self.id)
-            .bind(&self.category)
-            .bind(&self.attributes)
-            .bind(&self.raw_data)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
+let query = "INSERT INTO product_metadata (\"attributes\", \"category\", \"id\", \"raw_data\") VALUES ($1, $2, $3, $4) ON CONFLICT (\"id\") DO UPDATE SET \"attributes\" = EXCLUDED.\"attributes\", \"category\" = EXCLUDED.\"category\", \"raw_data\" = EXCLUDED.\"raw_data\"";
+let result = sqlx::query::<sqlx::Postgres>(query).bind(&self.attributes).bind(&self.category).bind(&self.id).bind(&self.raw_data).execute(executor).await?;
+Ok(result.rows_affected())
+}
 
-    /// Overwrites the entire record in the database using its Primary Key.
-    /// 
-    /// **Warning:** This will update ALL columns in the row with the values in the current struct.
-    /// If you only want to update one or two specific columns, use `update_partial_by_pk` instead 
-    /// to save network bandwidth and database disk I/O.
-    pub async fn update_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
-        let query = "UPDATE product_metadata SET category = $1, attributes = $2, raw_data = $3 WHERE id = $4";
-        let result = sqlx::query(query)
-            .bind(&self.category)
-            .bind(&self.attributes)
-            .bind(&self.raw_data)
-            .bind(&self.id)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
+    /// Upserts a batch of records. 
+/// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
+pub async fn upsert_batch<'e>(executor: &mut sqlx::Transaction<'e, sqlx::Postgres>, items: &[Self]) -> sqlx::Result<u64> {
+if items.is_empty() { return Ok(0); }
+let chunk_size = 65535 / 4;
+let mut total_affected = 0;
+for chunk in items.chunks(chunk_size.max(1)) {
+let mut qb: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new("INSERT INTO product_metadata (\"attributes\", \"category\", \"id\", \"raw_data\") ");
+qb.push_values(chunk, |mut b, item| {
+            b.push_bind(&item.attributes);
+            b.push_bind(&item.category);
+            b.push_bind(&item.id);
+            b.push_bind(&item.raw_data);
+            });
+qb.push(" ON CONFLICT (\"id\") DO UPDATE SET \"attributes\" = EXCLUDED.\"attributes\", \"category\" = EXCLUDED.\"category\", \"raw_data\" = EXCLUDED.\"raw_data\"");
+let result = qb.build().execute(&mut **executor).await?;
+total_affected += result.rows_affected();
+}
+Ok(total_affected)
+}
 
-    /// Deletes the specific record from the database using its Primary Key.
-    /// 
-    /// Returns the number of affected rows (1 if deleted, 0 if it didn't exist).
-    pub async fn delete_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, id: &String) -> sqlx::Result<u64> {
-        let query = "DELETE FROM product_metadata WHERE id = $1";
-        let result = sqlx::query(query)
-            .bind(id)
-            .execute(executor).await?;
-        Ok(result.rows_affected())
-    }
+    pub async fn update_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(&self, executor: E) -> sqlx::Result<u64> {
+let query_str = "UPDATE product_metadata SET \"attributes\" = $1, \"category\" = $2, \"raw_data\" = $3 WHERE \"id\" = $4";
+let mut query = sqlx::query::<sqlx::Postgres>(query_str);
+        query = query.bind(&self.attributes);
+        query = query.bind(&self.category);
+        query = query.bind(&self.raw_data);
+        query = query.bind(&self.id);
+let result = query.execute(executor).await?;
+Ok(result.rows_affected())
+}
 
-    /// Deletes multiple records in a single query using an `IN (...)` clause.
-    /// 
-    /// **Performance:** This is the most efficient way to delete a batch of specific IDs.
-    /// Returns the total number of rows successfully deleted.
-    pub async fn delete_many_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, ids: &[String]) -> sqlx::Result<u64> {
-        if ids.is_empty() { return Ok(0); }
-        let mut query_builder: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new("DELETE FROM product_metadata WHERE id IN ");
-        query_builder.push("(");
-        let mut separated = query_builder.separated(", ");
-        for id in ids { separated.push_bind(id); }
-        separated.push_unseparated(")");
-        let result = query_builder.build().execute(executor).await?;
-        Ok(result.rows_affected())
-    }
+    pub async fn delete_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, id: &String) -> sqlx::Result<u64> {
+let query = "DELETE FROM product_metadata WHERE \"id\" = $1";
+let result = sqlx::query::<sqlx::Postgres>(query).bind(id).execute(executor).await?;
+Ok(result.rows_affected())
+}
+
+    pub async fn delete_many_by_id<'e>(executor: &mut sqlx::Transaction<'e, sqlx::Postgres>, ids: &[String]) -> sqlx::Result<u64> {
+if ids.is_empty() { return Ok(0); }
+let mut total_affected = 0;
+for chunk in ids.chunks(65535) {
+let mut qb: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new("DELETE FROM product_metadata WHERE \"id\" IN ");
+qb.push("(");
+let mut sep = qb.separated(", ");
+for id in chunk { sep.push_bind(id); }
+sep.push_unseparated(")");
+let result = qb.build().execute(&mut **executor).await?;
+total_affected += result.rows_affected();
+}
+Ok(total_affected)
+}
+
+    pub async fn update_partial_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, id: &str, patch: &ProductMetadataPatch) -> sqlx::Result<u64> {
+let mut qb: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new("UPDATE product_metadata SET ");
+let mut has = false;
+let mut sep = qb.separated(", ");
+        if let Some(val) = &patch.attributes {
+has = true;
+sep.push("\"attributes\" = ");
+sep.push_bind_unseparated(val);
+}
+        if let Some(val) = &patch.category {
+has = true;
+sep.push("\"category\" = ");
+sep.push_bind_unseparated(val);
+}
+        if let Some(val) = &patch.raw_data {
+has = true;
+sep.push("\"raw_data\" = ");
+sep.push_bind_unseparated(val);
+}
+        if !has { return Ok(0); }
+        qb.push(" WHERE \"id\" = ");
+qb.push_bind(id);
+        let result = qb.build().execute(executor).await?;
+Ok(result.rows_affected())
+}
 
 }
 
-/// Structure used for partial updates (Patching) of `product_metadata`.
-/// 
-/// Each field is wrapped in an `Option`. If a field is `None`, it will be completely ignored during the update.
-/// If it is `Some(value)`, that column will be updated in the database.
+#[allow(clippy::all)]
 #[derive(Debug, Clone, Default)]
 pub struct ProductMetadataPatch {
+    pub attributes: Option<Option<serde_json::Value>>,
     pub category: Option<String>,
-    pub attributes: Option<Option<String>>,
     pub raw_data: Option<Option<Vec<u8>>>,
-}
-
-impl ProductMetadata {
-    /// Updates ONLY the columns that contain data in the `patch` struct.
-    /// 
-    /// **Performance:** This is the most optimized way to update data.
-    /// It dynamically builds the SQL query to only include the changed columns, which saves network bandwidth
-    /// and significantly reduces database disk I/O (WAL logging) compared to a full row update.
-    pub async fn update_partial_by_pk<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(executor: E, id: &String, patch: &ProductMetadataPatch) -> sqlx::Result<u64> {
-        let mut query_builder: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new("UPDATE product_metadata SET ");
-        let mut has_fields = false;
-        let mut separated = query_builder.separated(", ");
-
-        if let Some(val) = &patch.category {
-            has_fields = true;
-            separated.push("category = ");
-            separated.push_bind_unseparated(val.clone());
-        }
-        if let Some(val) = &patch.attributes {
-            has_fields = true;
-            separated.push("attributes = ");
-            separated.push_bind_unseparated(val.clone());
-        }
-        if let Some(val) = &patch.raw_data {
-            has_fields = true;
-            separated.push("raw_data = ");
-            separated.push_bind_unseparated(val.clone());
-        }
-
-        if !has_fields {
-            // Si le patch est vide, on économise un aller-retour réseau
-            return Ok(0);
-        }
-
-        query_builder.push(" WHERE id = ");
-        query_builder.push_bind(id.clone());
-
-        let result = query_builder.build().execute(executor).await?;
-        Ok(result.rows_affected())
-    }
 }
 

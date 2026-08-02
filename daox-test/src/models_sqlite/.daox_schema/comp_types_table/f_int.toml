@@ -43,5 +43,11 @@ value = false
 [is_auto_increment]
 value = false
 
+[has_default]
+value = false
+
+[is_generated]
+value = false
+
 [business_rules]
 

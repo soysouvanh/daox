@@ -11,16 +11,17 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
-default = ["mysql"]
+default = ["mysql", "postgres", "sqlite"]
 mysql = ["sqlx/mysql"]
 postgres = ["sqlx/postgres"]
 sqlite = ["sqlx/sqlite"]
 
 [dependencies]
 # Database introspection (MySQL/MariaDB, PostgreSQL, SQLite)
-sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "any"] }
 tokio = { version = "1", features = ["full"] }
 
 # Minimal dependencies (SOTA)
 toml = "0.8"
 serde = { version = "1.0", features = ["derive"] }
+regex = "1"

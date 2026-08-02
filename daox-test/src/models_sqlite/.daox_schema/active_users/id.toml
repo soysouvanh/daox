@@ -1,33 +1,34 @@
 [type]
-value = "i64"
+value = "i32"
 message = "schema.type.message"
 
 [is_optional]
-value = false
-message = "schema.is_optional.message"
+value = true
+message = ""
+default = "0"
 
 # [enum_values]
 # value = []
 # message = 
 
 [max_length]
-value = 19
-message = "schema.max_length.message|19"
+value = 10
+message = "schema.max_length.message|10"
 
 [min_length]
-value = 1
-message = "schema.min_length.message|1"
+value = 0
+message = "schema.min_length.message|0"
 
 [min_value]
 value = 0
 message = "schema.min_value.message|0"
 
 [max_value]
-value = 9223372036854775807
-message = "schema.max_value.message|9223372036854775807"
+value = 2147483647
+message = "schema.max_value.message|2147483647"
 
 [format]
-value = '^[0-9]{1,19}$'
+value = '^[0-9]{1,10}$'
 message = "schema.format.message"
 
 [is_primary_key]
@@ -40,6 +41,12 @@ value = false
 value = false
 
 [is_auto_increment]
+value = false
+
+[has_default]
+value = false
+
+[is_generated]
 value = false
 
 [business_rules]

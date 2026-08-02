@@ -9,9 +9,15 @@ async fn main() {
     // Re-run if the core generator (`daox`) source code changes.
     println!("cargo:rerun-if-changed=../daox/src");
 
-    // Database connection URLs (running via Docker Compose).
-    let mysql_url = "mysql://root:root@localhost:3307/daox_test";
-    let pg_url = "postgres://root:root@localhost:5433/daox_test";
+    // Re-run if schema files change
+    println!("cargo:rerun-if-changed=../.daox_schema");
+    println!("cargo:rerun-if-changed=../overrides");
+
+    // Database connection URLs
+    let mysql_url = std::env::var("DATABASE_URL_MYSQL")
+        .expect("DATABASE_URL_MYSQL is required for Daox code generation");
+    let pg_url = std::env::var("DATABASE_URL_PG")
+        .expect("DATABASE_URL_PG is required for Daox code generation");
 
     let mysql_out = "src/models_mysql";
     let pg_out = "src/models_pg";
@@ -25,14 +31,14 @@ async fn main() {
     }
 
     // Generate MySQL DAOs (pure sqlx, zero framework dependency).
-    let generator_mysql = daox::DaoxGenerator::new(mysql_url, mysql_out);
+    let generator_mysql = daox::DaoxGenerator::new(&mysql_url, mysql_out);
     generator_mysql
         .generate()
         .await
         .expect("Failed to generate MySQL DAOs");
 
     // Generate PostgreSQL DAOs.
-    let generator_pg = daox::DaoxGenerator::new(pg_url, pg_out);
+    let generator_pg = daox::DaoxGenerator::new(&pg_url, pg_out);
     generator_pg
         .generate()
         .await
@@ -53,11 +59,46 @@ async fn main() {
 
     // Initialize SQLite schema.
     let sqlite_schema: &'static str = include_str!("../init_sqlite.sql");
-    for query in sqlite_schema.split(";") {
-        let q = query.trim();
-        if !q.is_empty() {
-            sqlx::Executor::execute(&sqlite_pool, q).await.unwrap();
+    let mut queries = Vec::new();
+    let mut in_string = false;
+    let mut in_line_comment = false;
+    let mut start = 0;
+    for (i, c) in sqlite_schema.char_indices() {
+        if in_line_comment {
+            if c == '\n' {
+                in_line_comment = false;
+            }
+            continue;
         }
+
+        if !in_string && c == '-' {
+            if sqlite_schema[i..].starts_with("--") {
+                in_line_comment = true;
+                continue;
+            }
+        }
+
+        if c == '\'' {
+            in_string = !in_string;
+        }
+
+        if c == ';' && !in_string {
+            let q = sqlite_schema[start..i].trim();
+            if !q.is_empty() {
+                queries.push(q);
+            }
+            start = i + 1;
+        }
+    }
+    let q = sqlite_schema[start..].trim();
+    if !q.is_empty() {
+        queries.push(q);
+    }
+
+    for (i, q) in queries.into_iter().enumerate() {
+        sqlx::Executor::execute(&sqlite_pool, q)
+            .await
+            .unwrap_or_else(|e| panic!("Query {} failed: {}\n{}", i, e, q));
     }
 
     let sqlite_out = "src/models_sqlite";

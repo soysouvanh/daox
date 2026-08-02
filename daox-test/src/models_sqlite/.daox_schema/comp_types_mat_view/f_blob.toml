@@ -1,5 +1,5 @@
 [type]
-value = "Vec<u8>"
+value = "String"
 message = "schema.type.message"
 
 [is_optional]
@@ -24,7 +24,7 @@ message = "schema.min_length.message|0"
 # message = 
 
 [format]
-value = '^.*$'
+value = '^[À-ÿA-Za-z0-9_ -]*$'
 message = "schema.format.message"
 
 [is_primary_key]
@@ -37,6 +37,12 @@ value = false
 value = false
 
 [is_auto_increment]
+value = false
+
+[has_default]
+value = false
+
+[is_generated]
 value = false
 
 [business_rules]

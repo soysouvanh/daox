@@ -1,8 +1,8 @@
-#  LightX Overrides Strategy
+#  Daox Overrides Strategy
 
 Bienvenue dans le dossier d'overrides !
 
-La philosophie "Database-First" de LightX écrase entièrement le dossier `schema/` à chaque compilation.
+La philosophie "Database-First" de Daox écrase entièrement le dossier `schema/` à chaque compilation.
 **Ne modifiez jamais les fichiers dans `schema/` car ils seront écrasés !**
 
 Si vous souhaitez surcharger des règles de validation métier (ex: forcer `min_length = 5` sur une colonne SQL), vous devez reproduire l'arborescence de la table ici.

@@ -10,6 +10,10 @@ message = "schema.is_optional.message"
 # value = []
 # message = 
 
+[max_length]
+value = 50
+message = "schema.max_length.message|50"
+
 [min_length]
 value = 1
 message = "schema.min_length.message|1"
@@ -27,7 +31,7 @@ value = '^[À-ÿA-Za-z0-9_ -]*$'
 message = "schema.format.message"
 
 [is_primary_key]
-value = true
+value = false
 
 [is_unique]
 value = false
@@ -36,6 +40,12 @@ value = false
 value = false
 
 [is_auto_increment]
+value = false
+
+[has_default]
+value = false
+
+[is_generated]
 value = false
 
 [business_rules]

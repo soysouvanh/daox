@@ -85,15 +85,13 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
             created_at: None,
         });
     }
-    Users::insert_batch(&pool, &batch_users).await.unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    Users::insert_batch(&mut tx, &batch_users).await.unwrap();
+    tx.commit().await.unwrap();
 
     // --- COUNT ---
     let count = Users::count(&pool).await.unwrap();
     assert!(count >= 51);
-
-    // --- LIST_PAGINATED ---
-    let page = Users::list_paginated(&pool, "id", 1, 10).await.unwrap();
-    assert_eq!(page.len(), 10);
 
     // --- LIST_BY_CURSOR ---
     let cursor_page = Users::list_by_cursor(&pool, user1_id as i64, 5)
@@ -135,7 +133,9 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
 
     // --- DELETE_MANY_BY_PK ---
     let ids: Vec<i64> = (1..=10).collect();
-    Users::delete_many_by_id(&pool, &ids).await.unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    Users::delete_many_by_id(&mut tx, &ids).await.unwrap();
+    tx.commit().await.unwrap();
 
     // --- TRANSACTION TEST (ROLLBACK) ---
     {
@@ -239,15 +239,13 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
             created_at: None,
         });
     }
-    Users::insert_batch(&pool, &batch_users).await.unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    Users::insert_batch(&mut tx, &batch_users).await.unwrap();
+    tx.commit().await.unwrap();
 
     // --- COUNT ---
     let count = Users::count(&pool).await.unwrap();
     assert!(count >= 51);
-
-    // --- LIST_PAGINATED ---
-    let page = Users::list_paginated(&pool, "id", 1, 10).await.unwrap();
-    assert_eq!(page.len(), 10);
 
     // --- LIST_BY_CURSOR ---
     let cursor_page = Users::list_by_cursor(&pool, user1_id as i64, 5)
@@ -358,11 +356,13 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
     let user1_id = user1.insert(&pool).await.unwrap();
 
     // --- EXISTS ---
-    let exists = Users::exists_by_id(&pool, user1_id as i64).await.unwrap();
+    let exists = Users::exists_by_id(&pool, user1_id.try_into().unwrap())
+        .await
+        .unwrap();
     assert!(exists);
 
     // --- GET_BY_PK ---
-    let fetched = Users::get_by_id(&pool, user1_id as i64)
+    let fetched = Users::get_by_id(&pool, user1_id.try_into().unwrap())
         .await
         .unwrap()
         .unwrap();
@@ -372,7 +372,7 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
     let mut user_to_update = fetched.clone();
     user_to_update.status = "inactive".into();
     user_to_update.update_by_id(&pool).await.unwrap();
-    let check = Users::get_by_id(&pool, user1_id as i64)
+    let check = Users::get_by_id(&pool, user1_id.try_into().unwrap())
         .await
         .unwrap()
         .unwrap();
@@ -390,18 +390,16 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
             created_at: None,
         });
     }
-    Users::insert_batch(&pool, &batch_users).await.unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    Users::insert_batch(&mut tx, &batch_users).await.unwrap();
+    tx.commit().await.unwrap();
 
     // --- COUNT ---
     let count = Users::count(&pool).await.unwrap();
     assert!(count >= 51);
 
-    // --- LIST_PAGINATED ---
-    let page = Users::list_paginated(&pool, "id", 1, 10).await.unwrap();
-    assert_eq!(page.len(), 10);
-
     // --- LIST_BY_CURSOR ---
-    let cursor_page = Users::list_by_cursor(&pool, user1_id as i64, 5)
+    let cursor_page = Users::list_by_cursor(&pool, user1_id.try_into().unwrap(), 5)
         .await
         .unwrap();
     assert!(cursor_page.len() <= 5);

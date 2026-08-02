@@ -1,8 +1,8 @@
-#  LightX Overrides Strategy
+#  Daox Overrides Strategy
 
 Welcome to the overrides directory!
 
-The "Database-First" philosophy of LightX completely overwrites the `schema/` directory on each compilation.
+The "Database-First" philosophy of Daox completely overwrites the `schema/` directory on each compilation.
 **Never modify the files in `schema/` as they will be overwritten!**
 
 If you want to override business validation rules (e.g., forcing `min_length = 5` on an SQL column), you must replicate the table's directory structure here.

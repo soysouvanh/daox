@@ -6,9 +6,9 @@ message = "schema.type.message"
 value = false
 message = "schema.is_optional.message"
 
-[enum_values]
-value = ["tech", "food", "books"]
-message = "schema.enum_values.message"
+# [enum_values]
+# value = []
+# message = 
 
 [min_length]
 value = 1
@@ -23,7 +23,7 @@ message = "schema.min_length.message|1"
 # message = 
 
 [format]
-value = '^(tech|food|books)$'
+value = '^[À-ÿA-Za-z0-9_ -]*$'
 message = "schema.format.message"
 
 [is_primary_key]
@@ -36,6 +36,12 @@ value = false
 value = false
 
 [is_auto_increment]
+value = false
+
+[has_default]
+value = false
+
+[is_generated]
 value = false
 
 [business_rules]
