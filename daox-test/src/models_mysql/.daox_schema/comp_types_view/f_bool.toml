@@ -1,34 +1,30 @@
 [type]
-value = "i16"
+value = "bool"
 message = "schema.type.message"
 
 [is_optional]
 value = true
 message = ""
-default = "0"
+default = "false"
 
 # [enum_values]
 # value = []
 # message = 
 
-[max_length]
-value = 5
-message = "schema.max_length.message|5"
-
 [min_length]
 value = 0
 message = "schema.min_length.message|0"
 
-[min_value]
-value = 0
-message = "schema.min_value.message|0"
+# [min_value]
+# value = 
+# message = 
 
-[max_value]
-value = 32767
-message = "schema.max_value.message|32767"
+# [max_value]
+# value = 
+# message = 
 
 [format]
-value = '^[0-9]{1,5}$'
+value = '^[01]$'
 message = "schema.format.message"
 
 [is_primary_key]

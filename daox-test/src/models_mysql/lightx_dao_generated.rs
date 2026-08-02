@@ -282,12 +282,8 @@ impl CompTypesMatView {
 
     /// Inserts multiple records in a single atomic transaction. (Batch Insert)
     pub async fn insert_many(items: &[Self], ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
-        ctx.get_or_create_default_tx().await?;
-        let mut count = 0;
-        for item in items {
-            item.insert(ctx).await?;
-            count += 1;
-        }
+        let tx = ctx.get_or_create_default_tx().await?;
+        let count = Self::insert_batch(&mut **tx, items).await.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(count)
     }
 
@@ -535,21 +531,15 @@ impl CompTypesMetadata {
 
     /// Inserts multiple records in a single atomic transaction. (Batch Insert)
     pub async fn insert_many(items: &[Self], ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
-        ctx.get_or_create_default_tx().await?;
-        let mut count = 0;
-        for item in items {
-            item.insert(ctx).await?;
-            count += 1;
-        }
+        let tx = ctx.get_or_create_default_tx().await?;
+        let count = Self::insert_batch(&mut **tx, items).await.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(count)
     }
 
     /// Upserts multiple records in a single atomic transaction. (Batch Upsert)
     pub async fn upsert_many(items: &[Self], ctx: &mut RequestContext) -> Result<(), lightx::core::AppError> {
-        ctx.get_or_create_default_tx().await?;
-        for item in items {
-            item.upsert(ctx).await?;
-        }
+        let tx = ctx.get_or_create_default_tx().await?;
+        Self::upsert_batch(&mut **tx, items).await.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(())
     }
 
@@ -813,21 +803,15 @@ impl CompTypesTable {
 
     /// Inserts multiple records in a single atomic transaction. (Batch Insert)
     pub async fn insert_many(items: &[Self], ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
-        ctx.get_or_create_default_tx().await?;
-        let mut count = 0;
-        for item in items {
-            item.insert(ctx).await?;
-            count += 1;
-        }
+        let tx = ctx.get_or_create_default_tx().await?;
+        let count = Self::insert_batch(&mut **tx, items).await.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(count)
     }
 
     /// Upserts multiple records in a single atomic transaction. (Batch Upsert)
     pub async fn upsert_many(items: &[Self], ctx: &mut RequestContext) -> Result<(), lightx::core::AppError> {
-        ctx.get_or_create_default_tx().await?;
-        for item in items {
-            item.upsert(ctx).await?;
-        }
+        let tx = ctx.get_or_create_default_tx().await?;
+        Self::upsert_batch(&mut **tx, items).await.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(())
     }
 
@@ -1083,21 +1067,15 @@ impl Configurations {
 
     /// Inserts multiple records in a single atomic transaction. (Batch Insert)
     pub async fn insert_many(items: &[Self], ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
-        ctx.get_or_create_default_tx().await?;
-        let mut count = 0;
-        for item in items {
-            item.insert(ctx).await?;
-            count += 1;
-        }
+        let tx = ctx.get_or_create_default_tx().await?;
+        let count = Self::insert_batch(&mut **tx, items).await.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(count)
     }
 
     /// Upserts multiple records in a single atomic transaction. (Batch Upsert)
     pub async fn upsert_many(items: &[Self], ctx: &mut RequestContext) -> Result<(), lightx::core::AppError> {
-        ctx.get_or_create_default_tx().await?;
-        for item in items {
-            item.upsert(ctx).await?;
-        }
+        let tx = ctx.get_or_create_default_tx().await?;
+        Self::upsert_batch(&mut **tx, items).await.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(())
     }
 
@@ -1266,21 +1244,15 @@ impl Currencies {
 
     /// Inserts multiple records in a single atomic transaction. (Batch Insert)
     pub async fn insert_many(items: &[Self], ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
-        ctx.get_or_create_default_tx().await?;
-        let mut count = 0;
-        for item in items {
-            item.insert(ctx).await?;
-            count += 1;
-        }
+        let tx = ctx.get_or_create_default_tx().await?;
+        let count = Self::insert_batch(&mut **tx, items).await.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(count)
     }
 
     /// Upserts multiple records in a single atomic transaction. (Batch Upsert)
     pub async fn upsert_many(items: &[Self], ctx: &mut RequestContext) -> Result<(), lightx::core::AppError> {
-        ctx.get_or_create_default_tx().await?;
-        for item in items {
-            item.upsert(ctx).await?;
-        }
+        let tx = ctx.get_or_create_default_tx().await?;
+        Self::upsert_batch(&mut **tx, items).await.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(())
     }
 
@@ -1437,21 +1409,15 @@ impl OrderItems {
 
     /// Inserts multiple records in a single atomic transaction. (Batch Insert)
     pub async fn insert_many(items: &[Self], ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
-        ctx.get_or_create_default_tx().await?;
-        let mut count = 0;
-        for item in items {
-            item.insert(ctx).await?;
-            count += 1;
-        }
+        let tx = ctx.get_or_create_default_tx().await?;
+        let count = Self::insert_batch(&mut **tx, items).await.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(count)
     }
 
     /// Upserts multiple records in a single atomic transaction. (Batch Upsert)
     pub async fn upsert_many(items: &[Self], ctx: &mut RequestContext) -> Result<(), lightx::core::AppError> {
-        ctx.get_or_create_default_tx().await?;
-        for item in items {
-            item.upsert(ctx).await?;
-        }
+        let tx = ctx.get_or_create_default_tx().await?;
+        Self::upsert_batch(&mut **tx, items).await.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(())
     }
 
@@ -1652,21 +1618,15 @@ impl ProductMetadata {
 
     /// Inserts multiple records in a single atomic transaction. (Batch Insert)
     pub async fn insert_many(items: &[Self], ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
-        ctx.get_or_create_default_tx().await?;
-        let mut count = 0;
-        for item in items {
-            item.insert(ctx).await?;
-            count += 1;
-        }
+        let tx = ctx.get_or_create_default_tx().await?;
+        let count = Self::insert_batch(&mut **tx, items).await.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(count)
     }
 
     /// Upserts multiple records in a single atomic transaction. (Batch Upsert)
     pub async fn upsert_many(items: &[Self], ctx: &mut RequestContext) -> Result<(), lightx::core::AppError> {
-        ctx.get_or_create_default_tx().await?;
-        for item in items {
-            item.upsert(ctx).await?;
-        }
+        let tx = ctx.get_or_create_default_tx().await?;
+        Self::upsert_batch(&mut **tx, items).await.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(())
     }
 
@@ -1823,21 +1783,15 @@ impl UserRoles {
 
     /// Inserts multiple records in a single atomic transaction. (Batch Insert)
     pub async fn insert_many(items: &[Self], ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
-        ctx.get_or_create_default_tx().await?;
-        let mut count = 0;
-        for item in items {
-            item.insert(ctx).await?;
-            count += 1;
-        }
+        let tx = ctx.get_or_create_default_tx().await?;
+        let count = Self::insert_batch(&mut **tx, items).await.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(count)
     }
 
     /// Upserts multiple records in a single atomic transaction. (Batch Upsert)
     pub async fn upsert_many(items: &[Self], ctx: &mut RequestContext) -> Result<(), lightx::core::AppError> {
-        ctx.get_or_create_default_tx().await?;
-        for item in items {
-            item.upsert(ctx).await?;
-        }
+        let tx = ctx.get_or_create_default_tx().await?;
+        Self::upsert_batch(&mut **tx, items).await.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(())
     }
 
@@ -2133,21 +2087,15 @@ impl Users {
 
     /// Inserts multiple records in a single atomic transaction. (Batch Insert)
     pub async fn insert_many(items: &[Self], ctx: &mut RequestContext) -> Result<u64, lightx::core::AppError> {
-        ctx.get_or_create_default_tx().await?;
-        let mut count = 0;
-        for item in items {
-            item.insert(ctx).await?;
-            count += 1;
-        }
+        let tx = ctx.get_or_create_default_tx().await?;
+        let count = Self::insert_batch(&mut **tx, items).await.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(count)
     }
 
     /// Upserts multiple records in a single atomic transaction. (Batch Upsert)
     pub async fn upsert_many(items: &[Self], ctx: &mut RequestContext) -> Result<(), lightx::core::AppError> {
-        ctx.get_or_create_default_tx().await?;
-        for item in items {
-            item.upsert(ctx).await?;
-        }
+        let tx = ctx.get_or_create_default_tx().await?;
+        Self::upsert_batch(&mut **tx, items).await.map_err(|e| lightx::core::AppError::DatabaseError { msg: e.to_string(), file: file!(), line: line!() })?;
         Ok(())
     }
 
