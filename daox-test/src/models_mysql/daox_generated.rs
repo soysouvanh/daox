@@ -1,7 +1,8 @@
 // Code generated automatically by daox. DO NOT EDIT.
 // Pure sqlx layer – zero framework dependency.
-#![allow(clippy::all)]
 
+
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ActiveUsers {
     pub email: String,
@@ -10,6 +11,7 @@ pub struct ActiveUsers {
     pub last_name: String,
 }
 
+#[allow(clippy::all)]
 impl ActiveUsers {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM active_users";
@@ -39,6 +41,7 @@ impl ActiveUsers {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct CompTypesActiveView {
     pub f_date: Option<chrono::NaiveDate>,
@@ -47,6 +50,7 @@ pub struct CompTypesActiveView {
     pub id: i64,
 }
 
+#[allow(clippy::all)]
 impl CompTypesActiveView {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM comp_types_active_view";
@@ -76,6 +80,7 @@ impl CompTypesActiveView {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct CompTypesMatView {
     pub f_blob: Option<Vec<u8>>,
@@ -93,6 +98,7 @@ pub struct CompTypesMatView {
     pub id: i64,
 }
 
+#[allow(clippy::all)]
 impl CompTypesMatView {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM comp_types_mat_view";
@@ -150,6 +156,7 @@ impl CompTypesMatView {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct CompTypesMetadata {
     pub comp_types_id: i64,
@@ -161,6 +168,7 @@ pub struct CompTypesMetadata {
     pub id: i64,
 }
 
+#[allow(clippy::all)]
 impl CompTypesMetadata {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM comp_types_metadata";
@@ -305,6 +313,7 @@ impl CompTypesMetadata {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, Default)]
 pub struct CompTypesMetadataPatch {
     pub comp_types_id: Option<i64>,
@@ -315,6 +324,7 @@ pub struct CompTypesMetadataPatch {
     pub f_timestamp: Option<Option<chrono::DateTime<chrono::Utc>>>,
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct CompTypesTable {
     pub f_bool: Option<i16>,
@@ -327,6 +337,7 @@ pub struct CompTypesTable {
     pub id: i64,
 }
 
+#[allow(clippy::all)]
 impl CompTypesTable {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM comp_types_table";
@@ -478,6 +489,7 @@ impl CompTypesTable {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, Default)]
 pub struct CompTypesTablePatch {
     pub f_bool: Option<Option<i16>>,
@@ -489,6 +501,7 @@ pub struct CompTypesTablePatch {
     pub f_varchar: Option<Option<String>>,
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct CompTypesView {
     pub f_blob: Option<Vec<u8>>,
@@ -506,6 +519,7 @@ pub struct CompTypesView {
     pub id: i64,
 }
 
+#[allow(clippy::all)]
 impl CompTypesView {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM comp_types_view";
@@ -535,6 +549,7 @@ impl CompTypesView {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Configurations {
     pub id: i32,
@@ -543,6 +558,7 @@ pub struct Configurations {
     pub value: Option<String>,
 }
 
+#[allow(clippy::all)]
 impl Configurations {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM configurations";
@@ -666,6 +682,7 @@ impl Configurations {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, Default)]
 pub struct ConfigurationsPatch {
     pub r#match: Option<Option<String>>,
@@ -673,12 +690,14 @@ pub struct ConfigurationsPatch {
     pub value: Option<Option<String>>,
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Currencies {
     pub code: String,
     pub name: String,
 }
 
+#[allow(clippy::all)]
 impl Currencies {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM currencies";
@@ -789,11 +808,13 @@ impl Currencies {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, Default)]
 pub struct CurrenciesPatch {
     pub name: Option<String>,
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct OrderItems {
     pub order_id: i64,
@@ -801,6 +822,7 @@ pub struct OrderItems {
     pub quantity: i32,
 }
 
+#[allow(clippy::all)]
 impl OrderItems {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM order_items";
@@ -899,11 +921,13 @@ impl OrderItems {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, Default)]
 pub struct OrderItemsPatch {
     pub quantity: Option<i32>,
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ProductMetadata {
     pub attributes: Option<String>,
@@ -912,6 +936,7 @@ pub struct ProductMetadata {
     pub raw_data: Option<Vec<u8>>,
 }
 
+#[allow(clippy::all)]
 impl ProductMetadata {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM product_metadata";
@@ -1036,6 +1061,7 @@ impl ProductMetadata {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, Default)]
 pub struct ProductMetadataPatch {
     pub attributes: Option<Option<String>>,
@@ -1043,6 +1069,7 @@ pub struct ProductMetadataPatch {
     pub raw_data: Option<Option<Vec<u8>>>,
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct UserRoles {
     pub assigned_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -1050,6 +1077,7 @@ pub struct UserRoles {
     pub user_id: i64,
 }
 
+#[allow(clippy::all)]
 impl UserRoles {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM user_roles";
@@ -1146,6 +1174,23 @@ impl UserRoles {
         Ok(result.rows_affected())
     }
 
+    pub async fn get_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, user_id: i64, role_name: &String) -> sqlx::Result<Option<Self>> {
+        let query = "SELECT `assigned_at`, `role_name`, `user_id` FROM user_roles WHERE `user_id` = ? AND `role_name` = ?";
+        sqlx::query_as::<_, Self>(query).bind(user_id).bind(role_name).fetch_optional(executor).await
+    }
+
+    pub async fn exists_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, user_id: i64, role_name: &String) -> sqlx::Result<bool> {
+        let query = "SELECT 1 FROM user_roles WHERE `user_id` = ? AND `role_name` = ? LIMIT 1";
+        let exists: Option<(i32,)> = sqlx::query_as(query).bind(user_id).bind(role_name).fetch_optional(executor).await?;
+        Ok(exists.is_some())
+    }
+
+    pub async fn delete_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, user_id: i64, role_name: &String) -> sqlx::Result<u64> {
+        let query = "DELETE FROM user_roles WHERE `user_id` = ? AND `role_name` = ?";
+        let result = sqlx::query::<sqlx::MySql>(query).bind(user_id).bind(role_name).execute(executor).await?;
+        Ok(result.rows_affected())
+    }
+
     pub async fn list_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, user_id: i64) -> sqlx::Result<Vec<Self>> {
         let query = "SELECT `assigned_at`, `role_name`, `user_id` FROM user_roles WHERE `user_id` = ?";
         sqlx::query_as::<_, Self>(query).bind(user_id).fetch_all(executor).await
@@ -1168,30 +1213,15 @@ impl UserRoles {
         Ok(result.rows_affected())
     }
 
-    pub async fn get_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, user_id: i64, role_name: &String) -> sqlx::Result<Option<Self>> {
-        let query = "SELECT `assigned_at`, `role_name`, `user_id` FROM user_roles WHERE `user_id` = ? AND `role_name` = ?";
-        sqlx::query_as::<_, Self>(query).bind(user_id).bind(role_name).fetch_optional(executor).await
-    }
-
-    pub async fn exists_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, user_id: i64, role_name: &String) -> sqlx::Result<bool> {
-        let query = "SELECT 1 FROM user_roles WHERE `user_id` = ? AND `role_name` = ? LIMIT 1";
-        let exists: Option<(i32,)> = sqlx::query_as(query).bind(user_id).bind(role_name).fetch_optional(executor).await?;
-        Ok(exists.is_some())
-    }
-
-    pub async fn delete_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, user_id: i64, role_name: &String) -> sqlx::Result<u64> {
-        let query = "DELETE FROM user_roles WHERE `user_id` = ? AND `role_name` = ?";
-        let result = sqlx::query::<sqlx::MySql>(query).bind(user_id).bind(role_name).execute(executor).await?;
-        Ok(result.rows_affected())
-    }
-
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, Default)]
 pub struct UserRolesPatch {
     pub assigned_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Users {
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -1202,6 +1232,7 @@ pub struct Users {
     pub status: String,
 }
 
+#[allow(clippy::all)]
 impl Users {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM users";
@@ -1378,6 +1409,7 @@ impl Users {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, Default)]
 pub struct UsersPatch {
     pub created_at: Option<Option<chrono::DateTime<chrono::Utc>>>,

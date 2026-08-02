@@ -1,7 +1,8 @@
 // Code generated automatically by daox. DO NOT EDIT.
 // Pure sqlx layer – zero framework dependency.
-#![allow(clippy::all)]
 
+
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ActiveUsers {
     pub email: String,
@@ -10,6 +11,7 @@ pub struct ActiveUsers {
     pub last_name: String,
 }
 
+#[allow(clippy::all)]
 impl ActiveUsers {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM active_users";
@@ -58,6 +60,7 @@ impl ActiveUsers {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct CompTypesActiveView {
     pub f_date: Option<chrono::NaiveDate>,
@@ -66,6 +69,7 @@ pub struct CompTypesActiveView {
     pub id: i64,
 }
 
+#[allow(clippy::all)]
 impl CompTypesActiveView {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM comp_types_active_view";
@@ -95,6 +99,7 @@ impl CompTypesActiveView {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct CompTypesMatView {
     pub f_blob: Option<Vec<u8>>,
@@ -112,6 +117,7 @@ pub struct CompTypesMatView {
     pub id: i64,
 }
 
+#[allow(clippy::all)]
 impl CompTypesMatView {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM comp_types_mat_view";
@@ -169,6 +175,7 @@ impl CompTypesMatView {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct CompTypesMetadata {
     pub comp_types_id: i64,
@@ -180,6 +187,7 @@ pub struct CompTypesMetadata {
     pub id: i64,
 }
 
+#[allow(clippy::all)]
 impl CompTypesMetadata {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM comp_types_metadata";
@@ -324,6 +332,7 @@ impl CompTypesMetadata {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, Default)]
 pub struct CompTypesMetadataPatch {
     pub comp_types_id: Option<i64>,
@@ -334,6 +343,7 @@ pub struct CompTypesMetadataPatch {
     pub f_timestamp: Option<Option<chrono::DateTime<chrono::Utc>>>,
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct CompTypesTable {
     pub f_bool: Option<bool>,
@@ -346,6 +356,7 @@ pub struct CompTypesTable {
     pub id: i64,
 }
 
+#[allow(clippy::all)]
 impl CompTypesTable {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM comp_types_table";
@@ -497,6 +508,7 @@ impl CompTypesTable {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, Default)]
 pub struct CompTypesTablePatch {
     pub f_bool: Option<Option<bool>>,
@@ -508,6 +520,7 @@ pub struct CompTypesTablePatch {
     pub f_varchar: Option<Option<String>>,
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct CompTypesView {
     pub f_blob: Option<Vec<u8>>,
@@ -525,6 +538,7 @@ pub struct CompTypesView {
     pub id: i64,
 }
 
+#[allow(clippy::all)]
 impl CompTypesView {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM comp_types_view";
@@ -554,6 +568,7 @@ impl CompTypesView {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Configurations {
     pub id: i32,
@@ -562,6 +577,7 @@ pub struct Configurations {
     pub value: Option<String>,
 }
 
+#[allow(clippy::all)]
 impl Configurations {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM configurations";
@@ -685,6 +701,7 @@ impl Configurations {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, Default)]
 pub struct ConfigurationsPatch {
     pub r#match: Option<Option<String>>,
@@ -692,12 +709,14 @@ pub struct ConfigurationsPatch {
     pub value: Option<Option<String>>,
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Currencies {
     pub code: String,
     pub name: String,
 }
 
+#[allow(clippy::all)]
 impl Currencies {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM currencies";
@@ -808,11 +827,13 @@ impl Currencies {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, Default)]
 pub struct CurrenciesPatch {
     pub name: Option<String>,
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct OrderItems {
     pub order_id: i64,
@@ -820,6 +841,7 @@ pub struct OrderItems {
     pub quantity: i32,
 }
 
+#[allow(clippy::all)]
 impl OrderItems {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM order_items";
@@ -918,11 +940,13 @@ impl OrderItems {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, Default)]
 pub struct OrderItemsPatch {
     pub quantity: Option<i32>,
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ProductMetadata {
     pub attributes: Option<String>,
@@ -931,6 +955,7 @@ pub struct ProductMetadata {
     pub raw_data: Option<Vec<u8>>,
 }
 
+#[allow(clippy::all)]
 impl ProductMetadata {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM product_metadata";
@@ -1055,6 +1080,7 @@ impl ProductMetadata {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, Default)]
 pub struct ProductMetadataPatch {
     pub attributes: Option<Option<String>>,
@@ -1062,6 +1088,7 @@ pub struct ProductMetadataPatch {
     pub raw_data: Option<Option<Vec<u8>>>,
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct UserRoles {
     pub assigned_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -1069,6 +1096,7 @@ pub struct UserRoles {
     pub user_id: i64,
 }
 
+#[allow(clippy::all)]
 impl UserRoles {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM user_roles";
@@ -1206,11 +1234,13 @@ impl UserRoles {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, Default)]
 pub struct UserRolesPatch {
     pub assigned_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Users {
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -1221,6 +1251,7 @@ pub struct Users {
     pub status: String,
 }
 
+#[allow(clippy::all)]
 impl Users {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E) -> sqlx::Result<u64> {
         let query = "SELECT COUNT(*) FROM users";
@@ -1397,6 +1428,7 @@ impl Users {
 
 }
 
+#[allow(clippy::all)]
 #[derive(Debug, Clone, Default)]
 pub struct UsersPatch {
     pub created_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
