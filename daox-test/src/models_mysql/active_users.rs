@@ -22,16 +22,22 @@ sqlx::query_as::<_, Self>(query).fetch(executor)
 
     pub async fn list_paginated<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(executor: E, order_by: &str, page: u32, page_size: u32) -> sqlx::Result<Vec<Self>> {
 const ALLOWED: &[&str] = &["email", "first_name", "id", "last_name"];
-for part in order_by.split(',') {
-let col = part.trim().trim_end_matches(" ASC").trim_end_matches(" DESC").trim();
+let mut valid_order = String::new();
+for (i, part) in order_by.split(',').enumerate() {
+let part = part.trim();
+let is_desc = part.ends_with(" DESC") || part.ends_with(" desc");
+let col = part.trim_end_matches(" ASC").trim_end_matches(" DESC").trim_end_matches(" asc").trim_end_matches(" desc").trim();
 if !ALLOWED.contains(&col) {
 return Err(sqlx::Error::Protocol(format!("Invalid ORDER BY: {}", col).into()));
 }
+if i > 0 { valid_order.push_str(", "); }
+valid_order.push_str(col);
+if is_desc { valid_order.push_str(" DESC"); } else { valid_order.push_str(" ASC"); }
 }
 let page_size = page_size.clamp(1, 10000);
 let offset = page.saturating_sub(1) * page_size;
 let mut qb: sqlx::QueryBuilder<sqlx::MySql> = sqlx::QueryBuilder::new("SELECT `email`, `first_name`, `id`, `last_name` FROM active_users ORDER BY ");
-qb.push(order_by);
+qb.push(valid_order);
 qb.push(" LIMIT ");
 qb.push_bind(page_size as i64);
 qb.push(" OFFSET ");

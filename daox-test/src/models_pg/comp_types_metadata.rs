@@ -55,7 +55,7 @@ let mut payload = String::with_capacity(chunk.len() * 128);
 for item in chunk {
                 payload.push_str(&{ let v = &item.comp_types_id; v.to_string() });
                 payload.push(',');
-                payload.push_str(&if let Some(v) = &item.f_blob { format!("\\\\x{}", v.iter().fold(String::new(), |mut acc, b| { std::fmt::Write::write_fmt(&mut acc, format_args!("{:02x}", b)).ok(); acc })) } else { String::new() });
+                payload.push_str(&if let Some(v) = &item.f_blob { { let mut s = String::with_capacity(3 + v.len() * 2); s.push_str("\\\\x"); for b in v { use std::fmt::Write; write!(&mut s, "{:02x}", b).ok(); } s } } else { String::new() });
                 payload.push(',');
                 payload.push_str(&if let Some(v) = &item.f_date { format!("\"{}\"", v) } else { String::new() });
                 payload.push(',');

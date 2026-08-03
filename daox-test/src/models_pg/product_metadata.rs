@@ -56,7 +56,7 @@ for item in chunk {
                 payload.push(',');
                 payload.push_str(&{ let v = &item.id; format!("\"{}\"", v.replace("\"", "\"\"")) });
                 payload.push(',');
-                payload.push_str(&if let Some(v) = &item.raw_data { format!("\\\\x{}", v.iter().fold(String::new(), |mut acc, b| { std::fmt::Write::write_fmt(&mut acc, format_args!("{:02x}", b)).ok(); acc })) } else { String::new() });
+                payload.push_str(&if let Some(v) = &item.raw_data { { let mut s = String::with_capacity(3 + v.len() * 2); s.push_str("\\\\x"); for b in v { use std::fmt::Write; write!(&mut s, "{:02x}", b).ok(); } s } } else { String::new() });
                 payload.push('\n');
 }
 copy_in.send(payload.as_bytes()).await?;
