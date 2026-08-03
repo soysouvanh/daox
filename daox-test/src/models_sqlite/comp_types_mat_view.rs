@@ -1,93 +1,241 @@
 #[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct CompTypesMatView {
-    pub f_blob: Option<String>,
-    pub f_bool: Option<String>,
+    pub f_blob: Option<Vec<u8>>,
+    pub f_bool: Option<bool>,
     pub f_date: Option<String>,
     pub f_datetime: Option<String>,
-    pub f_decimal: Option<String>,
+    pub f_decimal: Option<f64>,
     pub f_double: Option<f64>,
     pub f_float: Option<f64>,
     pub f_int: Option<i32>,
-    pub f_json: Option<String>,
+    pub f_json: Option<serde_json::Value>,
     pub f_text: Option<String>,
     pub f_timestamp: Option<String>,
     pub f_varchar: Option<String>,
     pub id: Option<i32>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompTypesMatViewOrderBy {
+    FBlobAsc,
+    FBlobDesc,
+    FBoolAsc,
+    FBoolDesc,
+    FDateAsc,
+    FDateDesc,
+    FDatetimeAsc,
+    FDatetimeDesc,
+    FDecimalAsc,
+    FDecimalDesc,
+    FDoubleAsc,
+    FDoubleDesc,
+    FFloatAsc,
+    FFloatDesc,
+    FIntAsc,
+    FIntDesc,
+    FJsonAsc,
+    FJsonDesc,
+    FTextAsc,
+    FTextDesc,
+    FTimestampAsc,
+    FTimestampDesc,
+    FVarcharAsc,
+    FVarcharDesc,
+    IdAsc,
+    IdDesc,
+}
+
+impl CompTypesMatViewOrderBy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CompTypesMatViewOrderBy::FBlobAsc => r#"`f_blob` ASC"#,
+            CompTypesMatViewOrderBy::FBlobDesc => r#"`f_blob` DESC"#,
+            CompTypesMatViewOrderBy::FBoolAsc => r#"`f_bool` ASC"#,
+            CompTypesMatViewOrderBy::FBoolDesc => r#"`f_bool` DESC"#,
+            CompTypesMatViewOrderBy::FDateAsc => r#"`f_date` ASC"#,
+            CompTypesMatViewOrderBy::FDateDesc => r#"`f_date` DESC"#,
+            CompTypesMatViewOrderBy::FDatetimeAsc => r#"`f_datetime` ASC"#,
+            CompTypesMatViewOrderBy::FDatetimeDesc => r#"`f_datetime` DESC"#,
+            CompTypesMatViewOrderBy::FDecimalAsc => r#"`f_decimal` ASC"#,
+            CompTypesMatViewOrderBy::FDecimalDesc => r#"`f_decimal` DESC"#,
+            CompTypesMatViewOrderBy::FDoubleAsc => r#"`f_double` ASC"#,
+            CompTypesMatViewOrderBy::FDoubleDesc => r#"`f_double` DESC"#,
+            CompTypesMatViewOrderBy::FFloatAsc => r#"`f_float` ASC"#,
+            CompTypesMatViewOrderBy::FFloatDesc => r#"`f_float` DESC"#,
+            CompTypesMatViewOrderBy::FIntAsc => r#"`f_int` ASC"#,
+            CompTypesMatViewOrderBy::FIntDesc => r#"`f_int` DESC"#,
+            CompTypesMatViewOrderBy::FJsonAsc => r#"`f_json` ASC"#,
+            CompTypesMatViewOrderBy::FJsonDesc => r#"`f_json` DESC"#,
+            CompTypesMatViewOrderBy::FTextAsc => r#"`f_text` ASC"#,
+            CompTypesMatViewOrderBy::FTextDesc => r#"`f_text` DESC"#,
+            CompTypesMatViewOrderBy::FTimestampAsc => r#"`f_timestamp` ASC"#,
+            CompTypesMatViewOrderBy::FTimestampDesc => r#"`f_timestamp` DESC"#,
+            CompTypesMatViewOrderBy::FVarcharAsc => r#"`f_varchar` ASC"#,
+            CompTypesMatViewOrderBy::FVarcharDesc => r#"`f_varchar` DESC"#,
+            CompTypesMatViewOrderBy::IdAsc => r#"`id` ASC"#,
+            CompTypesMatViewOrderBy::IdDesc => r#"`id` DESC"#,
+        }
+    }
+}
+
 #[allow(clippy::all)]
 impl CompTypesMatView {
-    pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E) -> sqlx::Result<u64> {
-let query = "SELECT COUNT(*) FROM comp_types_mat_view";
-let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
-Ok(count as u64)
-}
+    #[allow(unused_comparisons)]
+    pub fn validate(&self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        if let Some(v) = self.f_int.as_ref() {
+            if (*v as i64) < 0 {
+                errors.push("f_int: minimum value '0' not met".into());
+            }
+        }
+        if let Some(v) = self.f_int.as_ref() {
+            if (*v as i64) > 2147483647 {
+                errors.push("f_int: maximum value '2147483647' exceeded".into());
+            }
+        }
+        if let Some(v) = self.id.as_ref() {
+            if (*v as i64) < 0 {
+                errors.push("id: minimum value '0' not met".into());
+            }
+        }
+        if let Some(v) = self.id.as_ref() {
+            if (*v as i64) > 2147483647 {
+                errors.push("id: maximum value '2147483647' exceeded".into());
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
 
-    pub fn stream_all<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite> + 'e>(executor: E) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-let query = "SELECT `f_blob`, `f_bool`, `f_date`, `f_datetime`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_json`, `f_text`, `f_timestamp`, `f_varchar`, `id` FROM comp_types_mat_view ORDER BY `id` ASC";
-sqlx::query_as::<_, Self>(query).fetch(executor)
-}
+    /// Returns the total number of rows in the table.
+    ///
+    /// **⚠️ Performance Warning:** On some databases (e.g., MySQL/InnoDB, PostgreSQL),
+    /// a `COUNT(*)` without a `WHERE` clause can cause a full table scan,
+    /// which may take a long time on large tables (e.g. >10M rows).
+    /// Consider caching this value or using an approximate row count from
+    /// `information_schema.tables` or `pg_class` if exact precision is not required.
+    pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+    ) -> sqlx::Result<u64> {
+        let query = r#"SELECT COUNT(*) FROM comp_types_mat_view"#;
+        let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
+        Ok(count as u64)
+    }
 
-    pub async fn list_paginated<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E, order_by: &str, page: u32, page_size: u32) -> sqlx::Result<Vec<Self>> {
-const ALLOWED: &[&str] = &["f_blob", "f_bool", "f_date", "f_datetime", "f_decimal", "f_double", "f_float", "f_int", "f_json", "f_text", "f_timestamp", "f_varchar", "id"];
-let mut valid_order = String::new();
-for (i, part) in order_by.split(',').enumerate() {
-let part = part.trim();
-let is_desc = part.ends_with(" DESC") || part.ends_with(" desc");
-let col = part.trim_end_matches(" ASC").trim_end_matches(" DESC").trim_end_matches(" asc").trim_end_matches(" desc").trim();
-if !ALLOWED.contains(&col) {
-return Err(sqlx::Error::Protocol(format!("Invalid ORDER BY: {}", col).into()));
-}
-if i > 0 { valid_order.push_str(", "); }
-valid_order.push_str(col);
-if is_desc { valid_order.push_str(" DESC"); } else { valid_order.push_str(" ASC"); }
-}
-let page_size = page_size.clamp(1, 10000);
-let offset = page.saturating_sub(1) * page_size;
-let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new("SELECT `f_blob`, `f_bool`, `f_date`, `f_datetime`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_json`, `f_text`, `f_timestamp`, `f_varchar`, `id` FROM comp_types_mat_view ORDER BY ");
-qb.push(valid_order);
-qb.push(" LIMIT ");
-qb.push_bind(page_size as i64);
-qb.push(" OFFSET ");
-qb.push_bind(offset as i64);
-qb.build_query_as::<Self>().fetch_all(executor).await
-}
+    /// Returns an approximate total number of rows in the table.
+    /// Uses `MAX(rowid)` to provide an instant O(1) estimate without a full table scan.
+    pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+    ) -> sqlx::Result<u64> {
+        let query = r#"SELECT MAX(rowid) FROM comp_types_mat_view"#;
+        let count: Option<(Option<i64>,)> = sqlx::query_as(query).fetch_optional(executor).await?;
+        Ok(count
+            .and_then(|(c,)| c)
+            .map(|c| c.max(0) as u64)
+            .unwrap_or(0))
+    }
 
-    pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(&self, executor: E) -> sqlx::Result<u64> {
-let query = "INSERT INTO comp_types_mat_view (`f_blob`, `f_bool`, `f_date`, `f_datetime`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_json`, `f_text`, `f_timestamp`, `f_varchar`, `id`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-        let result = sqlx::query::<sqlx::Sqlite>(query).bind(&self.f_blob).bind(&self.f_bool).bind(&self.f_date).bind(&self.f_datetime).bind(&self.f_decimal).bind(&self.f_double).bind(&self.f_float).bind(&self.f_int).bind(&self.f_json).bind(&self.f_text).bind(&self.f_timestamp).bind(&self.f_varchar).bind(&self.id).execute(executor).await?;
-Ok(result.rows_affected())
-}
+    /// Streams rows from the table, ordered by the primary key.
+    /// **⚠️ Performance Warning:** Streaming a whole table without a limit or timeout can cause connection pool starvation.
+    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS.
+    pub fn stream_all<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite> + 'e>(
+        executor: E,
+        limit: i64,
+    ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
+        let query = r#"SELECT `f_blob`, `f_bool`, `f_date`, `f_datetime`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_json`, `f_text`, `f_timestamp`, `f_varchar`, `id` FROM comp_types_mat_view ORDER BY `id` ASC LIMIT ?"#;
+        sqlx::query_as::<_, Self>(query).bind(limit).fetch(executor)
+    }
 
-    /// Inserts a batch of records. 
-/// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
-pub async fn insert_batch<'e>(executor: &mut sqlx::Transaction<'e, sqlx::Sqlite>, items: &[Self]) -> sqlx::Result<u64> {
-if items.is_empty() { return Ok(0); }
-let chunk_size = 32766 / 13;
-let mut total_affected = 0;
-for chunk in items.chunks(chunk_size.max(1)) {
-let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new("INSERT INTO comp_types_mat_view (`f_blob`, `f_bool`, `f_date`, `f_datetime`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_json`, `f_text`, `f_timestamp`, `f_varchar`, `id`) ");
-qb.push_values(chunk, |mut b, item| {
-            b.push_bind(&item.f_blob);
-            b.push_bind(&item.f_bool);
-            b.push_bind(&item.f_date);
-            b.push_bind(&item.f_datetime);
-            b.push_bind(&item.f_decimal);
-            b.push_bind(&item.f_double);
-            b.push_bind(&item.f_float);
-            b.push_bind(&item.f_int);
-            b.push_bind(&item.f_json);
-            b.push_bind(&item.f_text);
-            b.push_bind(&item.f_timestamp);
-            b.push_bind(&item.f_varchar);
-            b.push_bind(&item.id);
+    #[deprecated(note = "Use list_by_cursor for large datasets")]
+    pub async fn list_paginated<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        order_by: &[CompTypesMatViewOrderBy],
+        page: u32,
+        page_size: u32,
+    ) -> sqlx::Result<Vec<Self>> {
+        if order_by.is_empty() {
+            return Err(sqlx::Error::Protocol("ORDER BY cannot be empty".into()));
+        }
+        let page_size = page_size.clamp(1, 10000);
+        let offset = page.saturating_sub(1) * page_size;
+        let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
+            r#"SELECT `f_blob`, `f_bool`, `f_date`, `f_datetime`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_json`, `f_text`, `f_timestamp`, `f_varchar`, `id` FROM comp_types_mat_view"#,
+        );
+        qb.push(" ORDER BY ");
+        for (i, o) in order_by.iter().enumerate() {
+            if i > 0 {
+                qb.push(", ");
+            }
+            qb.push(o.as_str());
+        }
+        qb.push(" LIMIT ");
+        qb.push_bind(page_size as i64);
+        qb.push(" OFFSET ");
+        qb.push_bind(offset as i64);
+        qb.build_query_as::<Self>().fetch_all(executor).await
+    }
+
+    pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        &self,
+        executor: E,
+    ) -> sqlx::Result<u64> {
+        let query = r#"INSERT INTO comp_types_mat_view (`f_blob`, `f_bool`, `f_date`, `f_datetime`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_json`, `f_text`, `f_timestamp`, `f_varchar`, `id`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#;
+        let result = sqlx::query::<sqlx::Sqlite>(query)
+            .bind(&self.f_blob)
+            .bind(&self.f_bool)
+            .bind(&self.f_date)
+            .bind(&self.f_datetime)
+            .bind(&self.f_decimal)
+            .bind(&self.f_double)
+            .bind(&self.f_float)
+            .bind(&self.f_int)
+            .bind(&self.f_json)
+            .bind(&self.f_text)
+            .bind(&self.f_timestamp)
+            .bind(&self.f_varchar)
+            .bind(&self.id)
+            .execute(executor)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    /// Inserts a batch of records.
+    /// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
+    pub async fn insert_batch<'e>(
+        executor: &mut sqlx::Transaction<'e, sqlx::Sqlite>,
+        items: &[Self],
+    ) -> sqlx::Result<u64> {
+        if items.is_empty() {
+            return Ok(0);
+        }
+        let chunk_size = 32766 / 13;
+        let mut total_affected = 0;
+        for chunk in items.chunks(chunk_size.max(1)) {
+            let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
+                r#"INSERT INTO comp_types_mat_view (`f_blob`, `f_bool`, `f_date`, `f_datetime`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_json`, `f_text`, `f_timestamp`, `f_varchar`, `id`) "#,
+            );
+            qb.push_values(chunk, |mut b, item| {
+                b.push_bind(&item.f_blob);
+                b.push_bind(&item.f_bool);
+                b.push_bind(&item.f_date);
+                b.push_bind(&item.f_datetime);
+                b.push_bind(&item.f_decimal);
+                b.push_bind(&item.f_double);
+                b.push_bind(&item.f_float);
+                b.push_bind(&item.f_int);
+                b.push_bind(&item.f_json);
+                b.push_bind(&item.f_text);
+                b.push_bind(&item.f_timestamp);
+                b.push_bind(&item.f_varchar);
+                b.push_bind(&item.id);
             });
-let result = qb.build().execute(&mut **executor).await?;
-total_affected += result.rows_affected();
+            let result = qb.build().execute(&mut **executor).await?;
+            total_affected += result.rows_affected();
+        }
+        Ok(total_affected)
+    }
 }
-Ok(total_affected)
-}
-
-}
-

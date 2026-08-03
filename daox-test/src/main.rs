@@ -101,7 +101,7 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
 
     // --- STREAM_ALL ---
     {
-        let mut stream = Users::stream_all(&pool);
+        let mut stream = Users::stream_all(&pool, 1000);
         let mut stream_count = 0;
         while stream.next().await.is_some() {
             stream_count += 1;
@@ -130,6 +130,74 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
     OrderItems::delete_by_order_id_and_product_id(&pool, 101, 42)
         .await
         .unwrap();
+
+    // --- UPSERT ---
+    let mut upsert_user = user_to_update.clone();
+    upsert_user.status = "active_upsert".into();
+    upsert_user.upsert(&pool).await.unwrap();
+    let check_upsert = Users::get_by_id(&pool, user1_id as i64)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(check_upsert.status, "active_upsert");
+
+    // --- UPSERT_BATCH ---
+    let mut tx_upsert = pool.begin().await.unwrap();
+    upsert_user.last_name = "Upsert Batch".into();
+    Users::upsert_batch(&mut tx_upsert, &[upsert_user])
+        .await
+        .unwrap();
+    tx_upsert.commit().await.unwrap();
+    let check_upsert_batch = Users::get_by_id(&pool, user1_id as i64)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(check_upsert_batch.last_name, "Upsert Batch");
+
+    // --- UPDATE_PARTIAL_BY_PK ---
+    let patch = models_pg::UsersPatch {
+        status: Some("partial".into()),
+        ..Default::default()
+    };
+    Users::update_partial_by_id(&pool, user1_id as i64, &patch)
+        .await
+        .unwrap();
+    let check_partial = Users::get_by_id(&pool, user1_id as i64)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(check_partial.status, "partial");
+
+    // --- INDEX METHODS ---
+    assert!(
+        Users::exists_by_email(&pool, &"alice@daox.dev".into())
+            .await
+            .unwrap()
+    );
+    assert!(
+        Users::get_by_email(&pool, &"alice@daox.dev".into())
+            .await
+            .unwrap()
+            .is_some()
+    );
+    let ls = Users::list_by_first_name_and_last_name(&pool, &"Bot1".into(), &"Batch".into(), 10)
+        .await
+        .unwrap();
+    assert!(!ls.is_empty());
+    assert!(
+        Users::exists_by_first_name_and_last_name(&pool, &"Bot1".into(), &"Batch".into())
+            .await
+            .unwrap()
+    );
+    Users::delete_by_first_name_and_last_name(&pool, &"Bot2".into(), &"Batch".into())
+        .await
+        .unwrap();
+    Users::delete_by_email(&pool, &"alice@daox.dev".into())
+        .await
+        .unwrap();
+
+    // --- DELETE_BY_ID ---
+    Users::delete_by_id(&pool, user1_id as i64).await.unwrap();
 
     // --- DELETE_MANY_BY_PK ---
     let ids: Vec<i64> = (1..=10).collect();
@@ -255,7 +323,7 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
 
     // --- STREAM_ALL ---
     {
-        let mut stream = Users::stream_all(&pool);
+        let mut stream = Users::stream_all(&pool, 1000);
         let mut stream_count = 0;
         while stream.next().await.is_some() {
             stream_count += 1;
@@ -284,6 +352,80 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
     OrderItems::delete_by_order_id_and_product_id(&pool, 200, 99)
         .await
         .unwrap();
+
+    // --- UPSERT ---
+    let mut upsert_user = user_to_update.clone();
+    upsert_user.status = "active_upsert".into();
+    upsert_user.upsert(&pool).await.unwrap();
+    let check_upsert = Users::get_by_id(&pool, user1_id as i64)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(check_upsert.status, "active_upsert");
+
+    // --- UPSERT_BATCH ---
+    let mut tx_upsert = pool.begin().await.unwrap();
+    upsert_user.last_name = "Upsert Batch".into();
+    Users::upsert_batch(&mut tx_upsert, &[upsert_user])
+        .await
+        .unwrap();
+    tx_upsert.commit().await.unwrap();
+    let check_upsert_batch = Users::get_by_id(&pool, user1_id as i64)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(check_upsert_batch.last_name, "Upsert Batch");
+
+    // --- UPDATE_PARTIAL_BY_PK ---
+    let patch = models_mysql::UsersPatch {
+        status: Some("partial".into()),
+        ..Default::default()
+    };
+    Users::update_partial_by_id(&pool, user1_id as i64, &patch)
+        .await
+        .unwrap();
+    let check_partial = Users::get_by_id(&pool, user1_id as i64)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(check_partial.status, "partial");
+
+    // --- INDEX METHODS ---
+    assert!(
+        Users::exists_by_email(&pool, &"bob@daox.dev".into())
+            .await
+            .unwrap()
+    );
+    assert!(
+        Users::get_by_email(&pool, &"bob@daox.dev".into())
+            .await
+            .unwrap()
+            .is_some()
+    );
+    let ls = Users::list_by_last_name_and_first_name(&pool, &"Batch".into(), &"Worker1".into(), 10)
+        .await
+        .unwrap();
+    assert!(!ls.is_empty());
+    assert!(
+        Users::exists_by_last_name_and_first_name(&pool, &"Batch".into(), &"Worker1".into())
+            .await
+            .unwrap()
+    );
+    Users::delete_by_last_name_and_first_name(&pool, &"Batch".into(), &"Worker2".into())
+        .await
+        .unwrap();
+    Users::delete_by_email(&pool, &"bob@daox.dev".into())
+        .await
+        .unwrap();
+
+    // --- DELETE_BY_ID ---
+    Users::delete_by_id(&pool, user1_id as i64).await.unwrap();
+
+    // --- DELETE_MANY_BY_PK ---
+    let ids: Vec<i64> = (1..=10).collect();
+    let mut tx = pool.begin().await.unwrap();
+    Users::delete_many_by_id(&mut tx, &ids).await.unwrap();
+    tx.commit().await.unwrap();
 
     // --- TRANSACTION TEST (ROLLBACK) ---
     {
@@ -406,7 +548,7 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
 
     // --- STREAM_ALL ---
     {
-        let mut stream = Users::stream_all(&pool);
+        let mut stream = Users::stream_all(&pool, 1000);
         let mut stream_count = 0;
         while stream.next().await.is_some() {
             stream_count += 1;
@@ -435,6 +577,82 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
     OrderItems::delete_by_order_id_and_product_id(&pool, 300, 99)
         .await
         .unwrap();
+
+    // --- UPSERT ---
+    let mut upsert_user = user_to_update.clone();
+    upsert_user.email = "upsert1_sqlite@sqlite.dev".into();
+    upsert_user.status = "active_upsert".into();
+    upsert_user.upsert(&pool).await.unwrap();
+    let check_upsert = Users::get_by_email(&pool, &"upsert1_sqlite@sqlite.dev".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(check_upsert.status, "active_upsert");
+
+    // --- UPSERT_BATCH ---
+    let mut tx_upsert = pool.begin().await.unwrap();
+    upsert_user.email = "upsert2_sqlite@sqlite.dev".into();
+    upsert_user.last_name = "Upsert Batch".into();
+    Users::upsert_batch(&mut tx_upsert, &[upsert_user])
+        .await
+        .unwrap();
+    tx_upsert.commit().await.unwrap();
+    let check_upsert_batch = Users::get_by_email(&pool, &"upsert2_sqlite@sqlite.dev".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(check_upsert_batch.last_name, "Upsert Batch");
+
+    // --- UPDATE_PARTIAL_BY_PK ---
+    let patch = models_sqlite::UsersPatch {
+        status: Some("partial".into()),
+        ..Default::default()
+    };
+    Users::update_partial_by_id(&pool, user1_id as i32, &patch)
+        .await
+        .unwrap();
+    let check_partial = Users::get_by_id(&pool, user1_id as i32)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(check_partial.status, "partial");
+
+    // --- INDEX METHODS ---
+    assert!(
+        Users::exists_by_email(&pool, &"alice@sqlite.dev".into())
+            .await
+            .unwrap()
+    );
+    assert!(
+        Users::get_by_email(&pool, &"alice@sqlite.dev".into())
+            .await
+            .unwrap()
+            .is_some()
+    );
+    let ls = Users::list_by_last_name_and_first_name(&pool, &"Batch".into(), &"Worker1".into(), 10)
+        .await
+        .unwrap();
+    assert!(!ls.is_empty());
+    assert!(
+        Users::exists_by_last_name_and_first_name(&pool, &"Batch".into(), &"Worker1".into())
+            .await
+            .unwrap()
+    );
+    Users::delete_by_last_name_and_first_name(&pool, &"Batch".into(), &"Worker2".into())
+        .await
+        .unwrap();
+    Users::delete_by_email(&pool, &"alice@sqlite.dev".into())
+        .await
+        .unwrap();
+
+    // --- DELETE_BY_ID ---
+    Users::delete_by_id(&pool, user1_id as i32).await.unwrap();
+
+    // --- DELETE_MANY_BY_PK ---
+    let ids: Vec<i32> = (1..=10).collect();
+    let mut tx = pool.begin().await.unwrap();
+    Users::delete_many_by_id(&mut tx, &ids).await.unwrap();
+    tx.commit().await.unwrap();
 
     // --- TRANSACTION TEST (ROLLBACK) ---
     {

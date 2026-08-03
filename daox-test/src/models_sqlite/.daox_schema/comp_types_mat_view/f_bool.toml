@@ -1,11 +1,11 @@
 [type]
-value = "String"
+value = "bool"
 message = "schema.type.message"
 
 [is_optional]
 value = true
 message = ""
-default = ""
+default = "false"
 
 # [enum_values]
 # value = []
@@ -24,7 +24,7 @@ message = "schema.min_length.message|0"
 # message = 
 
 [format]
-value = '^[À-ÿA-Za-z0-9_ -]*$'
+value = '^[01]$'
 message = "schema.format.message"
 
 [is_primary_key]

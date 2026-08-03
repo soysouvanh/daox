@@ -5,130 +5,312 @@ pub struct Currencies {
     pub name: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CurrenciesOrderBy {
+    CodeAsc,
+    CodeDesc,
+    NameAsc,
+    NameDesc,
+}
+
+impl CurrenciesOrderBy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CurrenciesOrderBy::CodeAsc => r#"`code` ASC"#,
+            CurrenciesOrderBy::CodeDesc => r#"`code` DESC"#,
+            CurrenciesOrderBy::NameAsc => r#"`name` ASC"#,
+            CurrenciesOrderBy::NameDesc => r#"`name` DESC"#,
+        }
+    }
+}
+
 #[allow(clippy::all)]
 impl Currencies {
-    pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E) -> sqlx::Result<u64> {
-let query = "SELECT COUNT(*) FROM currencies";
-let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
-Ok(count as u64)
-}
+    #[allow(unused_comparisons)]
+    pub fn validate(&self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        if let Some(v) = Some(&self.code) {
+            if v.len() < 1 {
+                errors.push("code: min_length 1 not met".into());
+            }
+        }
+        if let Some(v) = Some(&self.name) {
+            if v.len() < 1 {
+                errors.push("name: min_length 1 not met".into());
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
 
-    pub fn stream_all<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite> + 'e>(executor: E) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-let query = "SELECT `code`, `name` FROM currencies ORDER BY `code` ASC";
-sqlx::query_as::<_, Self>(query).fetch(executor)
-}
+    /// Returns the total number of rows in the table.
+    ///
+    /// **⚠️ Performance Warning:** On some databases (e.g., MySQL/InnoDB, PostgreSQL),
+    /// a `COUNT(*)` without a `WHERE` clause can cause a full table scan,
+    /// which may take a long time on large tables (e.g. >10M rows).
+    /// Consider caching this value or using an approximate row count from
+    /// `information_schema.tables` or `pg_class` if exact precision is not required.
+    pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+    ) -> sqlx::Result<u64> {
+        let query = r#"SELECT COUNT(*) FROM currencies"#;
+        let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
+        Ok(count as u64)
+    }
 
-    pub async fn get_by_code<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E, code: &str) -> sqlx::Result<Option<Self>> {
-let query = "SELECT `code`, `name` FROM currencies WHERE `code` = ?";
-sqlx::query_as::<_, Self>(query).bind(code).fetch_optional(executor).await
-}
+    /// Returns an approximate total number of rows in the table.
+    /// Uses `MAX(rowid)` to provide an instant O(1) estimate without a full table scan.
+    pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+    ) -> sqlx::Result<u64> {
+        let query = r#"SELECT MAX(rowid) FROM currencies"#;
+        let count: Option<(Option<i64>,)> = sqlx::query_as(query).fetch_optional(executor).await?;
+        Ok(count
+            .and_then(|(c,)| c)
+            .map(|c| c.max(0) as u64)
+            .unwrap_or(0))
+    }
 
-    pub async fn exists_by_code<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E, code: &str) -> sqlx::Result<bool> {
-let query = "SELECT 1 FROM currencies WHERE `code` = ? LIMIT 1";
-let exists: Option<(i32,)> = sqlx::query_as(query).bind(code).fetch_optional(executor).await?;
-Ok(exists.is_some())
-}
+    /// Streams rows from the table, ordered by the primary key.
+    /// **⚠️ Performance Warning:** Streaming a whole table without a limit or timeout can cause connection pool starvation.
+    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS.
+    pub fn stream_all<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite> + 'e>(
+        executor: E,
+        limit: i64,
+    ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
+        let query = r#"SELECT `code`, `name` FROM currencies ORDER BY `code` ASC LIMIT ?"#;
+        sqlx::query_as::<_, Self>(query).bind(limit).fetch(executor)
+    }
 
-    pub async fn list_by_cursor<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E, last_id: &str, limit: u32) -> sqlx::Result<Vec<Self>> {
-let query = "SELECT `code`, `name` FROM currencies WHERE `code` > ? ORDER BY `code` ASC LIMIT ?";
-sqlx::query_as::<_, Self>(query).bind(last_id).bind(limit as i64).fetch_all(executor).await
-}
+    pub async fn get_by_code<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        code: &str,
+    ) -> sqlx::Result<Option<Self>> {
+        let query = r#"SELECT `code`, `name` FROM currencies WHERE `code` = ?"#;
+        sqlx::query_as::<_, Self>(query)
+            .bind(code)
+            .fetch_optional(executor)
+            .await
+    }
 
-    pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(&self, executor: E) -> sqlx::Result<u64> {
-let query = "INSERT INTO currencies (`code`, `name`) VALUES (?, ?)";
-        let result = sqlx::query::<sqlx::Sqlite>(query).bind(&self.code).bind(&self.name).execute(executor).await?;
-Ok(result.rows_affected())
-}
+    pub async fn exists_by_code<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        code: &str,
+    ) -> sqlx::Result<bool> {
+        let query = r#"SELECT 1 FROM currencies WHERE `code` = ? LIMIT 1"#;
+        let exists: Option<(i32,)> = sqlx::query_as(query)
+            .bind(code)
+            .fetch_optional(executor)
+            .await?;
+        Ok(exists.is_some())
+    }
 
-    /// Inserts a batch of records. 
-/// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
-pub async fn insert_batch<'e>(executor: &mut sqlx::Transaction<'e, sqlx::Sqlite>, items: &[Self]) -> sqlx::Result<u64> {
-if items.is_empty() { return Ok(0); }
-let chunk_size = 32766 / 2;
-let mut total_affected = 0;
-for chunk in items.chunks(chunk_size.max(1)) {
-let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new("INSERT INTO currencies (`code`, `name`) ");
-qb.push_values(chunk, |mut b, item| {
-            b.push_bind(&item.code);
-            b.push_bind(&item.name);
+    pub async fn list_by_cursor<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        last_id: &str,
+        limit: u32,
+    ) -> sqlx::Result<Vec<Self>> {
+        let query =
+            r#"SELECT `code`, `name` FROM currencies WHERE `code` > ? ORDER BY `code` ASC LIMIT ?"#;
+        sqlx::query_as::<_, Self>(query)
+            .bind(last_id)
+            .bind(limit as i64)
+            .fetch_all(executor)
+            .await
+    }
+
+    pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        &self,
+        executor: E,
+    ) -> sqlx::Result<u64> {
+        let query = r#"INSERT INTO currencies (`code`, `name`) VALUES (?, ?)"#;
+        let result = sqlx::query::<sqlx::Sqlite>(query)
+            .bind(&self.code)
+            .bind(&self.name)
+            .execute(executor)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    /// Inserts a batch of records.
+    /// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
+    pub async fn insert_batch<'e>(
+        executor: &mut sqlx::Transaction<'e, sqlx::Sqlite>,
+        items: &[Self],
+    ) -> sqlx::Result<u64> {
+        if items.is_empty() {
+            return Ok(0);
+        }
+        let chunk_size = 32766 / 2;
+        let mut total_affected = 0;
+        for chunk in items.chunks(chunk_size.max(1)) {
+            let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> =
+                sqlx::QueryBuilder::new(r#"INSERT INTO currencies (`code`, `name`) "#);
+            qb.push_values(chunk, |mut b, item| {
+                b.push_bind(&item.code);
+                b.push_bind(&item.name);
             });
-let result = qb.build().execute(&mut **executor).await?;
-total_affected += result.rows_affected();
-}
-Ok(total_affected)
-}
+            let result = qb.build().execute(&mut **executor).await?;
+            total_affected += result.rows_affected();
+        }
+        Ok(total_affected)
+    }
 
-    pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(&self, executor: E) -> sqlx::Result<u64> {
-let query = "INSERT INTO currencies (`code`, `name`) VALUES (?, ?) ON CONFLICT (`code`) DO UPDATE SET `name` = EXCLUDED.`name`";
-let result = sqlx::query::<sqlx::Sqlite>(query).bind(&self.code).bind(&self.name).execute(executor).await?;
-Ok(result.rows_affected())
-}
+    pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        &self,
+        executor: E,
+    ) -> sqlx::Result<u64> {
+        let query = r#"INSERT INTO currencies (`code`, `name`) VALUES (?, ?) ON CONFLICT (`code`) DO UPDATE SET `name` = EXCLUDED.`name`"#;
+        let result = sqlx::query::<sqlx::Sqlite>(query)
+            .bind(&self.code)
+            .bind(&self.name)
+            .execute(executor)
+            .await?;
+        Ok(result.rows_affected())
+    }
 
-    /// Upserts a batch of records. 
-/// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
-pub async fn upsert_batch<'e>(executor: &mut sqlx::Transaction<'e, sqlx::Sqlite>, items: &[Self]) -> sqlx::Result<u64> {
-if items.is_empty() { return Ok(0); }
-let chunk_size = 32766 / 2;
-let mut total_affected = 0;
-for chunk in items.chunks(chunk_size.max(1)) {
-let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new("INSERT INTO currencies (`code`, `name`) ");
-qb.push_values(chunk, |mut b, item| {
-            b.push_bind(&item.code);
-            b.push_bind(&item.name);
+    /// Upserts a batch of records.
+    /// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
+    pub async fn upsert_batch<'e>(
+        executor: &mut sqlx::Transaction<'e, sqlx::Sqlite>,
+        items: &[Self],
+    ) -> sqlx::Result<u64> {
+        if items.is_empty() {
+            return Ok(0);
+        }
+        let chunk_size = 32766 / 2;
+        let mut total_affected = 0;
+        for chunk in items.chunks(chunk_size.max(1)) {
+            let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> =
+                sqlx::QueryBuilder::new(r#"INSERT INTO currencies (`code`, `name`) "#);
+            qb.push_values(chunk, |mut b, item| {
+                b.push_bind(&item.code);
+                b.push_bind(&item.name);
             });
-qb.push(" ON CONFLICT (`code`) DO UPDATE SET `name` = EXCLUDED.`name`");
-let result = qb.build().execute(&mut **executor).await?;
-total_affected += result.rows_affected();
-}
-Ok(total_affected)
-}
+            qb.push(" ON CONFLICT (`code`) DO UPDATE SET `name` = EXCLUDED.`name`");
+            let result = qb.build().execute(&mut **executor).await?;
+            total_affected += result.rows_affected();
+        }
+        Ok(total_affected)
+    }
 
-    pub async fn update_by_code<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(&self, executor: E) -> sqlx::Result<u64> {
-let query_str = "UPDATE currencies SET `name` = ? WHERE `code` = ?";
-let mut query = sqlx::query::<sqlx::Sqlite>(query_str);
+    pub async fn update_by_code<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        &self,
+        executor: E,
+    ) -> sqlx::Result<u64> {
+        let query_str = r#"UPDATE currencies SET `name` = ? WHERE `code` = ?"#;
+        let mut query = sqlx::query::<sqlx::Sqlite>(query_str);
         query = query.bind(&self.name);
         query = query.bind(&self.code);
-let result = query.execute(executor).await?;
-Ok(result.rows_affected())
-}
+        let result = query.execute(executor).await?;
+        Ok(result.rows_affected())
+    }
 
-    pub async fn delete_by_code<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E, code: &String) -> sqlx::Result<u64> {
-let query = "DELETE FROM currencies WHERE `code` = ?";
-let result = sqlx::query::<sqlx::Sqlite>(query).bind(code).execute(executor).await?;
-Ok(result.rows_affected())
-}
+    pub async fn delete_by_code<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        code: &String,
+    ) -> sqlx::Result<u64> {
+        let query = r#"DELETE FROM currencies WHERE `code` = ?"#;
+        let result = sqlx::query::<sqlx::Sqlite>(query)
+            .bind(code)
+            .execute(executor)
+            .await?;
+        Ok(result.rows_affected())
+    }
 
-    pub async fn delete_many_by_code<'e>(executor: &mut sqlx::Transaction<'e, sqlx::Sqlite>, ids: &[String]) -> sqlx::Result<u64> {
-if ids.is_empty() { return Ok(0); }
-let mut total_affected = 0;
-for chunk in ids.chunks(32766) {
-let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new("DELETE FROM currencies WHERE `code` IN ");
-qb.push("(");
-let mut sep = qb.separated(", ");
-for id in chunk { sep.push_bind(id); }
-sep.push_unseparated(")");
-let result = qb.build().execute(&mut **executor).await?;
-total_affected += result.rows_affected();
-}
-Ok(total_affected)
-}
+    pub async fn delete_many_by_code<'e>(
+        executor: &mut sqlx::Transaction<'e, sqlx::Sqlite>,
+        ids: &[String],
+    ) -> sqlx::Result<u64> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let mut total_affected = 0;
+        let chunk_size = 500_usize.min(32766);
+        for chunk in ids.chunks(chunk_size) {
+            let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> =
+                sqlx::QueryBuilder::new(r#"DELETE FROM currencies WHERE `code` IN "#);
+            qb.push("(");
+            let mut sep = qb.separated(", ");
+            for id in chunk {
+                sep.push_bind(id);
+            }
+            sep.push_unseparated(")");
+            let result = qb.build().execute(&mut **executor).await?;
+            total_affected += result.rows_affected();
+        }
+        Ok(total_affected)
+    }
 
-    pub async fn update_partial_by_code<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E, code: &str, patch: &CurrenciesPatch) -> sqlx::Result<u64> {
-let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new("UPDATE currencies SET ");
-let mut has = false;
-let mut sep = qb.separated(", ");
+    #[allow(unused_assignments)]
+    pub async fn update_partial_by_code<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        code: &str,
+        patch: &CurrenciesPatch,
+    ) -> sqlx::Result<u64> {
+        let mut bits = [0u8; 1];
+        let mut has = false;
+        if patch.name.is_some() {
+            bits[0] |= 1 << 0;
+            has = true;
+        }
+        if !has {
+            return Ok(0);
+        }
+
+        static CACHE: std::sync::OnceLock<
+            [std::sync::RwLock<std::collections::HashMap<[u8; 1], String>>; 16],
+        > = std::sync::OnceLock::new();
+        let cache_shards = CACHE.get_or_init(|| {
+            std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()))
+        });
+        let shard_idx = bits
+            .iter()
+            .fold(0usize, |acc, &b| acc.wrapping_add(b as usize) ^ (acc << 3))
+            % 16;
+        let cache_lock = &cache_shards[shard_idx];
+        let query_str = {
+            let read = cache_lock.read().unwrap();
+            if let Some(q) = read.get(&bits) {
+                q.clone()
+            } else {
+                drop(read);
+                let mut write = cache_lock.write().unwrap();
+                if let Some(q) = write.get(&bits) {
+                    q.clone()
+                } else {
+                    let mut q = String::with_capacity(288);
+                    q.push_str("UPDATE currencies SET ");
+                    let mut first = true;
+                    if patch.name.is_some() {
+                        if !first {
+                            q.push_str(", ");
+                        }
+                        q.push_str(r#"`name` = "#);
+                        q.push_str("?");
+                        first = false;
+                    }
+                    q.push_str(r#" WHERE `code` = "#);
+                    q.push_str("?");
+                    if write.len() < 1000 {
+                        write.insert(bits, q.clone());
+                    }
+                    q
+                }
+            }
+        };
+
+        let mut query = sqlx::query::<sqlx::Sqlite>(sqlx::AssertSqlSafe(query_str.as_str()));
         if let Some(val) = &patch.name {
-has = true;
-sep.push("`name` = ");
-sep.push_bind_unseparated(val);
-}
-        if !has { return Ok(0); }
-        qb.push(" WHERE `code` = ");
-qb.push_bind(code);
-        let result = qb.build().execute(executor).await?;
-Ok(result.rows_affected())
-}
-
+            query = query.bind(val);
+        }
+        query = query.bind(code);
+        let result = query.execute(executor).await?;
+        Ok(result.rows_affected())
+    }
 }
 
 #[allow(clippy::all)]
@@ -136,4 +318,3 @@ Ok(result.rows_affected())
 pub struct CurrenciesPatch {
     pub name: Option<String>,
 }
-

@@ -1,5 +1,5 @@
 [type]
-value = "String"
+value = "Vec<u8>"
 message = "schema.type.message"
 
 [is_optional]
@@ -24,7 +24,7 @@ message = "schema.min_length.message|0"
 # message = 
 
 [format]
-value = '^[À-ÿA-Za-z0-9_ -]*$'
+value = '^.*$'
 message = "schema.format.message"
 
 [is_primary_key]

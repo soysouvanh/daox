@@ -7,144 +7,363 @@ pub struct Configurations {
     pub value: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigurationsOrderBy {
+    IdAsc,
+    IdDesc,
+    MatchAsc,
+    MatchDesc,
+    TypeAsc,
+    TypeDesc,
+    ValueAsc,
+    ValueDesc,
+}
+
+impl ConfigurationsOrderBy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ConfigurationsOrderBy::IdAsc => r#"`id` ASC"#,
+            ConfigurationsOrderBy::IdDesc => r#"`id` DESC"#,
+            ConfigurationsOrderBy::MatchAsc => r#"`match` ASC"#,
+            ConfigurationsOrderBy::MatchDesc => r#"`match` DESC"#,
+            ConfigurationsOrderBy::TypeAsc => r#"`type` ASC"#,
+            ConfigurationsOrderBy::TypeDesc => r#"`type` DESC"#,
+            ConfigurationsOrderBy::ValueAsc => r#"`value` ASC"#,
+            ConfigurationsOrderBy::ValueDesc => r#"`value` DESC"#,
+        }
+    }
+}
+
 #[allow(clippy::all)]
 impl Configurations {
-    pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E) -> sqlx::Result<u64> {
-let query = "SELECT COUNT(*) FROM configurations";
-let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
-Ok(count as u64)
-}
+    #[allow(unused_comparisons)]
+    pub fn validate(&self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        if let Some(v) = Some(&self.id) {
+            if (*v as i64) < 0 {
+                errors.push("id: minimum value '0' not met".into());
+            }
+        }
+        if let Some(v) = Some(&self.id) {
+            if (*v as i64) > 2147483647 {
+                errors.push("id: maximum value '2147483647' exceeded".into());
+            }
+        }
+        if let Some(v) = Some(&self.r#type) {
+            if v.len() < 1 {
+                errors.push("r#type: min_length 1 not met".into());
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
 
-    pub fn stream_all<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite> + 'e>(executor: E) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-let query = "SELECT `id`, `match`, `type`, `value` FROM configurations ORDER BY `id` ASC";
-sqlx::query_as::<_, Self>(query).fetch(executor)
-}
+    /// Returns the total number of rows in the table.
+    ///
+    /// **⚠️ Performance Warning:** On some databases (e.g., MySQL/InnoDB, PostgreSQL),
+    /// a `COUNT(*)` without a `WHERE` clause can cause a full table scan,
+    /// which may take a long time on large tables (e.g. >10M rows).
+    /// Consider caching this value or using an approximate row count from
+    /// `information_schema.tables` or `pg_class` if exact precision is not required.
+    pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+    ) -> sqlx::Result<u64> {
+        let query = r#"SELECT COUNT(*) FROM configurations"#;
+        let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
+        Ok(count as u64)
+    }
 
-    pub async fn get_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E, id: i32) -> sqlx::Result<Option<Self>> {
-let query = "SELECT `id`, `match`, `type`, `value` FROM configurations WHERE `id` = ?";
-sqlx::query_as::<_, Self>(query).bind(id).fetch_optional(executor).await
-}
+    /// Returns an approximate total number of rows in the table.
+    /// Uses `MAX(rowid)` to provide an instant O(1) estimate without a full table scan.
+    pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+    ) -> sqlx::Result<u64> {
+        let query = r#"SELECT MAX(rowid) FROM configurations"#;
+        let count: Option<(Option<i64>,)> = sqlx::query_as(query).fetch_optional(executor).await?;
+        Ok(count
+            .and_then(|(c,)| c)
+            .map(|c| c.max(0) as u64)
+            .unwrap_or(0))
+    }
 
-    pub async fn exists_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E, id: i32) -> sqlx::Result<bool> {
-let query = "SELECT 1 FROM configurations WHERE `id` = ? LIMIT 1";
-let exists: Option<(i32,)> = sqlx::query_as(query).bind(id).fetch_optional(executor).await?;
-Ok(exists.is_some())
-}
+    /// Streams rows from the table, ordered by the primary key.
+    /// **⚠️ Performance Warning:** Streaming a whole table without a limit or timeout can cause connection pool starvation.
+    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS.
+    pub fn stream_all<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite> + 'e>(
+        executor: E,
+        limit: i64,
+    ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
+        let query = r#"SELECT `id`, `match`, `type`, `value` FROM configurations ORDER BY `id` ASC LIMIT ?"#;
+        sqlx::query_as::<_, Self>(query).bind(limit).fetch(executor)
+    }
 
-    pub async fn list_by_cursor<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E, last_id: i32, limit: u32) -> sqlx::Result<Vec<Self>> {
-let query = "SELECT `id`, `match`, `type`, `value` FROM configurations WHERE `id` > ? ORDER BY `id` ASC LIMIT ?";
-sqlx::query_as::<_, Self>(query).bind(last_id).bind(limit as i64).fetch_all(executor).await
-}
+    pub async fn get_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        id: i32,
+    ) -> sqlx::Result<Option<Self>> {
+        let query = r#"SELECT `id`, `match`, `type`, `value` FROM configurations WHERE `id` = ?"#;
+        sqlx::query_as::<_, Self>(query)
+            .bind(id)
+            .fetch_optional(executor)
+            .await
+    }
 
-    pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(&self, executor: E) -> sqlx::Result<u64> {
-let query = "INSERT INTO configurations (`match`, `type`, `value`) VALUES (?, ?, ?)";
-        let result = sqlx::query::<sqlx::Sqlite>(query).bind(&self.r#match).bind(&self.r#type).bind(&self.value).execute(executor).await?;
-Ok(result.last_insert_rowid() as u64)
-}
+    pub async fn exists_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        id: i32,
+    ) -> sqlx::Result<bool> {
+        let query = r#"SELECT 1 FROM configurations WHERE `id` = ? LIMIT 1"#;
+        let exists: Option<(i32,)> = sqlx::query_as(query)
+            .bind(id)
+            .fetch_optional(executor)
+            .await?;
+        Ok(exists.is_some())
+    }
 
-    /// Inserts a batch of records. 
-/// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
-pub async fn insert_batch<'e>(executor: &mut sqlx::Transaction<'e, sqlx::Sqlite>, items: &[Self]) -> sqlx::Result<u64> {
-if items.is_empty() { return Ok(0); }
-let chunk_size = 32766 / 3;
-let mut total_affected = 0;
-for chunk in items.chunks(chunk_size.max(1)) {
-let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new("INSERT INTO configurations (`match`, `type`, `value`) ");
-qb.push_values(chunk, |mut b, item| {
-            b.push_bind(&item.r#match);
-            b.push_bind(&item.r#type);
-            b.push_bind(&item.value);
+    pub async fn list_by_cursor<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        last_id: i32,
+        limit: u32,
+    ) -> sqlx::Result<Vec<Self>> {
+        let query = r#"SELECT `id`, `match`, `type`, `value` FROM configurations WHERE `id` > ? ORDER BY `id` ASC LIMIT ?"#;
+        sqlx::query_as::<_, Self>(query)
+            .bind(last_id)
+            .bind(limit as i64)
+            .fetch_all(executor)
+            .await
+    }
+
+    pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        &self,
+        executor: E,
+    ) -> sqlx::Result<u64> {
+        let query = r#"INSERT INTO configurations (`match`, `type`, `value`) VALUES (?, ?, ?)"#;
+        let result = sqlx::query::<sqlx::Sqlite>(query)
+            .bind(&self.r#match)
+            .bind(&self.r#type)
+            .bind(&self.value)
+            .execute(executor)
+            .await?;
+        Ok(result.last_insert_rowid() as u64)
+    }
+
+    /// Inserts a batch of records.
+    /// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
+    pub async fn insert_batch<'e>(
+        executor: &mut sqlx::Transaction<'e, sqlx::Sqlite>,
+        items: &[Self],
+    ) -> sqlx::Result<u64> {
+        if items.is_empty() {
+            return Ok(0);
+        }
+        let chunk_size = 32766 / 3;
+        let mut total_affected = 0;
+        for chunk in items.chunks(chunk_size.max(1)) {
+            let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
+                r#"INSERT INTO configurations (`match`, `type`, `value`) "#,
+            );
+            qb.push_values(chunk, |mut b, item| {
+                b.push_bind(&item.r#match);
+                b.push_bind(&item.r#type);
+                b.push_bind(&item.value);
             });
-let result = qb.build().execute(&mut **executor).await?;
-total_affected += result.rows_affected();
-}
-Ok(total_affected)
-}
+            let result = qb.build().execute(&mut **executor).await?;
+            total_affected += result.rows_affected();
+        }
+        Ok(total_affected)
+    }
 
-    pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(&self, executor: E) -> sqlx::Result<u64> {
-let query = "INSERT INTO configurations (`match`, `type`, `value`) VALUES (?, ?, ?) ON CONFLICT (`id`) DO UPDATE SET `match` = EXCLUDED.`match`, `type` = EXCLUDED.`type`, `value` = EXCLUDED.`value`";
-let result = sqlx::query::<sqlx::Sqlite>(query).bind(&self.r#match).bind(&self.r#type).bind(&self.value).execute(executor).await?;
-Ok(result.rows_affected())
-}
+    pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        &self,
+        executor: E,
+    ) -> sqlx::Result<u64> {
+        let query = r#"INSERT INTO configurations (`match`, `type`, `value`) VALUES (?, ?, ?) ON CONFLICT (`id`) DO UPDATE SET `match` = EXCLUDED.`match`, `type` = EXCLUDED.`type`, `value` = EXCLUDED.`value`"#;
+        let result = sqlx::query::<sqlx::Sqlite>(query)
+            .bind(&self.r#match)
+            .bind(&self.r#type)
+            .bind(&self.value)
+            .execute(executor)
+            .await?;
+        Ok(result.rows_affected())
+    }
 
-    /// Upserts a batch of records. 
-/// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
-pub async fn upsert_batch<'e>(executor: &mut sqlx::Transaction<'e, sqlx::Sqlite>, items: &[Self]) -> sqlx::Result<u64> {
-if items.is_empty() { return Ok(0); }
-let chunk_size = 32766 / 3;
-let mut total_affected = 0;
-for chunk in items.chunks(chunk_size.max(1)) {
-let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new("INSERT INTO configurations (`match`, `type`, `value`) ");
-qb.push_values(chunk, |mut b, item| {
-            b.push_bind(&item.r#match);
-            b.push_bind(&item.r#type);
-            b.push_bind(&item.value);
+    /// Upserts a batch of records.
+    /// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
+    pub async fn upsert_batch<'e>(
+        executor: &mut sqlx::Transaction<'e, sqlx::Sqlite>,
+        items: &[Self],
+    ) -> sqlx::Result<u64> {
+        if items.is_empty() {
+            return Ok(0);
+        }
+        let chunk_size = 32766 / 3;
+        let mut total_affected = 0;
+        for chunk in items.chunks(chunk_size.max(1)) {
+            let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
+                r#"INSERT INTO configurations (`match`, `type`, `value`) "#,
+            );
+            qb.push_values(chunk, |mut b, item| {
+                b.push_bind(&item.r#match);
+                b.push_bind(&item.r#type);
+                b.push_bind(&item.value);
             });
-qb.push(" ON CONFLICT (`id`) DO UPDATE SET `match` = EXCLUDED.`match`, `type` = EXCLUDED.`type`, `value` = EXCLUDED.`value`");
-let result = qb.build().execute(&mut **executor).await?;
-total_affected += result.rows_affected();
-}
-Ok(total_affected)
-}
+            qb.push(" ON CONFLICT (`id`) DO UPDATE SET `match` = EXCLUDED.`match`, `type` = EXCLUDED.`type`, `value` = EXCLUDED.`value`");
+            let result = qb.build().execute(&mut **executor).await?;
+            total_affected += result.rows_affected();
+        }
+        Ok(total_affected)
+    }
 
-    pub async fn update_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(&self, executor: E) -> sqlx::Result<u64> {
-let query_str = "UPDATE configurations SET `match` = ?, `type` = ?, `value` = ? WHERE `id` = ?";
-let mut query = sqlx::query::<sqlx::Sqlite>(query_str);
+    pub async fn update_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        &self,
+        executor: E,
+    ) -> sqlx::Result<u64> {
+        let query_str =
+            r#"UPDATE configurations SET `match` = ?, `type` = ?, `value` = ? WHERE `id` = ?"#;
+        let mut query = sqlx::query::<sqlx::Sqlite>(query_str);
         query = query.bind(&self.r#match);
         query = query.bind(&self.r#type);
         query = query.bind(&self.value);
         query = query.bind(&self.id);
-let result = query.execute(executor).await?;
-Ok(result.rows_affected())
-}
+        let result = query.execute(executor).await?;
+        Ok(result.rows_affected())
+    }
 
-    pub async fn delete_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E, id: i32) -> sqlx::Result<u64> {
-let query = "DELETE FROM configurations WHERE `id` = ?";
-let result = sqlx::query::<sqlx::Sqlite>(query).bind(id).execute(executor).await?;
-Ok(result.rows_affected())
-}
+    pub async fn delete_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        id: i32,
+    ) -> sqlx::Result<u64> {
+        let query = r#"DELETE FROM configurations WHERE `id` = ?"#;
+        let result = sqlx::query::<sqlx::Sqlite>(query)
+            .bind(id)
+            .execute(executor)
+            .await?;
+        Ok(result.rows_affected())
+    }
 
-    pub async fn delete_many_by_id<'e>(executor: &mut sqlx::Transaction<'e, sqlx::Sqlite>, ids: &[i32]) -> sqlx::Result<u64> {
-if ids.is_empty() { return Ok(0); }
-let mut total_affected = 0;
-for chunk in ids.chunks(32766) {
-let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new("DELETE FROM configurations WHERE `id` IN ");
-qb.push("(");
-let mut sep = qb.separated(", ");
-for id in chunk { sep.push_bind(id); }
-sep.push_unseparated(")");
-let result = qb.build().execute(&mut **executor).await?;
-total_affected += result.rows_affected();
-}
-Ok(total_affected)
-}
+    pub async fn delete_many_by_id<'e>(
+        executor: &mut sqlx::Transaction<'e, sqlx::Sqlite>,
+        ids: &[i32],
+    ) -> sqlx::Result<u64> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let mut total_affected = 0;
+        let chunk_size = 5000_usize.min(32766);
+        for chunk in ids.chunks(chunk_size) {
+            let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> =
+                sqlx::QueryBuilder::new(r#"DELETE FROM configurations WHERE `id` IN "#);
+            qb.push("(");
+            let mut sep = qb.separated(", ");
+            for id in chunk {
+                sep.push_bind(id);
+            }
+            sep.push_unseparated(")");
+            let result = qb.build().execute(&mut **executor).await?;
+            total_affected += result.rows_affected();
+        }
+        Ok(total_affected)
+    }
 
-    pub async fn update_partial_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E, id: i32, patch: &ConfigurationsPatch) -> sqlx::Result<u64> {
-let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new("UPDATE configurations SET ");
-let mut has = false;
-let mut sep = qb.separated(", ");
+    #[allow(unused_assignments)]
+    pub async fn update_partial_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        id: i32,
+        patch: &ConfigurationsPatch,
+    ) -> sqlx::Result<u64> {
+        let mut bits = [0u8; 1];
+        let mut has = false;
+        if patch.r#match.is_some() {
+            bits[0] |= 1 << 0;
+            has = true;
+        }
+        if patch.r#type.is_some() {
+            bits[0] |= 1 << 1;
+            has = true;
+        }
+        if patch.value.is_some() {
+            bits[0] |= 1 << 2;
+            has = true;
+        }
+        if !has {
+            return Ok(0);
+        }
+
+        static CACHE: std::sync::OnceLock<
+            [std::sync::RwLock<std::collections::HashMap<[u8; 1], String>>; 16],
+        > = std::sync::OnceLock::new();
+        let cache_shards = CACHE.get_or_init(|| {
+            std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()))
+        });
+        let shard_idx = bits
+            .iter()
+            .fold(0usize, |acc, &b| acc.wrapping_add(b as usize) ^ (acc << 3))
+            % 16;
+        let cache_lock = &cache_shards[shard_idx];
+        let query_str = {
+            let read = cache_lock.read().unwrap();
+            if let Some(q) = read.get(&bits) {
+                q.clone()
+            } else {
+                drop(read);
+                let mut write = cache_lock.write().unwrap();
+                if let Some(q) = write.get(&bits) {
+                    q.clone()
+                } else {
+                    let mut q = String::with_capacity(352);
+                    q.push_str("UPDATE configurations SET ");
+                    let mut first = true;
+                    if patch.r#match.is_some() {
+                        if !first {
+                            q.push_str(", ");
+                        }
+                        q.push_str(r#"`match` = "#);
+                        q.push_str("?");
+                        first = false;
+                    }
+                    if patch.r#type.is_some() {
+                        if !first {
+                            q.push_str(", ");
+                        }
+                        q.push_str(r#"`type` = "#);
+                        q.push_str("?");
+                        first = false;
+                    }
+                    if patch.value.is_some() {
+                        if !first {
+                            q.push_str(", ");
+                        }
+                        q.push_str(r#"`value` = "#);
+                        q.push_str("?");
+                        first = false;
+                    }
+                    q.push_str(r#" WHERE `id` = "#);
+                    q.push_str("?");
+                    if write.len() < 1000 {
+                        write.insert(bits, q.clone());
+                    }
+                    q
+                }
+            }
+        };
+
+        let mut query = sqlx::query::<sqlx::Sqlite>(sqlx::AssertSqlSafe(query_str.as_str()));
         if let Some(val) = &patch.r#match {
-has = true;
-sep.push("`match` = ");
-sep.push_bind_unseparated(val);
-}
+            query = query.bind(val);
+        }
         if let Some(val) = &patch.r#type {
-has = true;
-sep.push("`type` = ");
-sep.push_bind_unseparated(val);
-}
+            query = query.bind(val);
+        }
         if let Some(val) = &patch.value {
-has = true;
-sep.push("`value` = ");
-sep.push_bind_unseparated(val);
-}
-        if !has { return Ok(0); }
-        qb.push(" WHERE `id` = ");
-qb.push_bind(id);
-        let result = qb.build().execute(executor).await?;
-Ok(result.rows_affected())
-}
-
+            query = query.bind(val);
+        }
+        query = query.bind(id);
+        let result = query.execute(executor).await?;
+        Ok(result.rows_affected())
+    }
 }
 
 #[allow(clippy::all)]
@@ -154,4 +373,3 @@ pub struct ConfigurationsPatch {
     pub r#type: Option<String>,
     pub value: Option<Option<String>>,
 }
-

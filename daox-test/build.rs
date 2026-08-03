@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Tell Cargo to re-run this build script ONLY if `build.rs` itself changes.
     println!("cargo:rerun-if-changed=build.rs");
 
@@ -14,20 +14,28 @@ async fn main() {
     println!("cargo:rerun-if-changed=../overrides");
 
     // Database connection URLs
-    let mysql_url = std::env::var("DATABASE_URL_MYSQL")
-        .expect("DATABASE_URL_MYSQL is required for Daox code generation");
-    let pg_url = std::env::var("DATABASE_URL_PG")
-        .expect("DATABASE_URL_PG is required for Daox code generation");
+    let mysql_url = std::env::var("DATABASE_URL_MYSQL").map_err(|e| {
+        format!(
+            "DATABASE_URL_MYSQL is required for Daox code generation: {}",
+            e
+        )
+    })?;
+    let pg_url = std::env::var("DATABASE_URL_PG").map_err(|e| {
+        format!(
+            "DATABASE_URL_PG is required for Daox code generation: {}",
+            e
+        )
+    })?;
 
     let mysql_out = "src/models_mysql";
     let pg_out = "src/models_pg";
 
     // Ensure output directories exist.
     if !Path::new(mysql_out).exists() {
-        fs::create_dir_all(mysql_out).unwrap();
+        fs::create_dir_all(mysql_out)?;
     }
     if !Path::new(pg_out).exists() {
-        fs::create_dir_all(pg_out).unwrap();
+        fs::create_dir_all(pg_out)?;
     }
 
     // Generate MySQL DAOs (pure sqlx, zero framework dependency).
@@ -35,27 +43,26 @@ async fn main() {
     generator_mysql
         .generate()
         .await
-        .expect("Failed to generate MySQL DAOs");
+        .map_err(|e| format!("Failed to generate MySQL DAOs: {}", e))?;
 
     // Generate PostgreSQL DAOs.
     let generator_pg = daox::DaoxGenerator::new(&pg_url, pg_out);
     generator_pg
         .generate()
         .await
-        .expect("Failed to generate Postgres DAOs");
+        .map_err(|e| format!("Failed to generate Postgres DAOs: {}", e))?;
 
     // --- SPECIAL HANDLING FOR SQLITE ---
-    let out_dir = std::env::var("OUT_DIR").unwrap();
+    let out_dir = std::env::var("OUT_DIR")?;
     let sqlite_db_path = format!("{}/daox_test.sqlite", out_dir);
     if !Path::new(&sqlite_db_path).exists() {
-        fs::File::create(&sqlite_db_path).unwrap();
+        fs::File::create(&sqlite_db_path)?;
     }
 
     let sqlite_url = format!("sqlite://{}", sqlite_db_path);
     let sqlite_pool = sqlx::sqlite::SqlitePoolOptions::new()
         .connect(&sqlite_url)
-        .await
-        .unwrap();
+        .await?;
 
     // Initialize SQLite schema.
     let sqlite_schema: &'static str = include_str!("../init_sqlite.sql");
@@ -71,11 +78,9 @@ async fn main() {
             continue;
         }
 
-        if !in_string && c == '-' {
-            if sqlite_schema[i..].starts_with("--") {
-                in_line_comment = true;
-                continue;
-            }
+        if !in_string && c == '-' && sqlite_schema[i..].starts_with("--") {
+            in_line_comment = true;
+            continue;
         }
 
         if c == '\'' {
@@ -98,12 +103,12 @@ async fn main() {
     for (i, q) in queries.into_iter().enumerate() {
         sqlx::Executor::execute(&sqlite_pool, q)
             .await
-            .unwrap_or_else(|e| panic!("Query {} failed: {}\n{}", i, e, q));
+            .map_err(|e| format!("Query {} failed: {}\n{}", i, e, q))?;
     }
 
     let sqlite_out = "src/models_sqlite";
     if !Path::new(sqlite_out).exists() {
-        fs::create_dir_all(sqlite_out).unwrap();
+        fs::create_dir_all(sqlite_out)?;
     }
 
     // Generate SQLite DAOs.
@@ -111,5 +116,7 @@ async fn main() {
     generator_sqlite
         .generate()
         .await
-        .expect("Failed to generate SQLite DAOs");
+        .map_err(|e| format!("Failed to generate SQLite DAOs: {}", e))?;
+
+    Ok(())
 }
