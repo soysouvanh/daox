@@ -222,7 +222,9 @@ Voici le processus modélisé :
 - **Opérations par lots et Upserts SOTA :** Intégration stricte native avec gestion parfaite multi-bases (`ON CONFLICT` et `ON DUPLICATE KEY`). ACID atomicity 100% garanti de manière ultra performante.
 - **Patching intelligent :** Mises à jour partielles garanties (`update_partial_by_pk`) pour réduire la bande passante et l'usure de vos disques (WAL).
 - **Conscient du dialecte et sécurisé contre les injections :** Échappement méticuleux.
+- **Validation des formats à l'exécution :** Garantit l'intégrité des données dans les insertions et mises à jour en masse par l'analyse du schéma (contraintes comme `min_length`, `enum`, regex, rejet NaN/Infinity). Appelez `.validate()` manuellement.
 - **Clés composites et Index Secondaires :** Génération native multi-clés primaires.
+- **Comptage de tables O(1) :** Appelez `estimated_count_upper_bound()` pour retourner un nombre approximatif en utilisant les statistiques internes très rapides des bases de données (`MAX(rowid)`, `pg_class`, `information_schema.tables`).
 
 ### Modèles d'Interaction Avancés
 

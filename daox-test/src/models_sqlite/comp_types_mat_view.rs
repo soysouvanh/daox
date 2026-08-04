@@ -81,7 +81,7 @@ impl CompTypesMatViewOrderBy {
 
 #[allow(clippy::all)]
 impl CompTypesMatView {
-    #[allow(unused_comparisons)]
+    #[allow(unused_comparisons, unused_mut)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         #[cfg(not(feature = "validation"))]
         {
@@ -116,6 +116,21 @@ impl CompTypesMatView {
                 None => {
                     errors.push("f_datetime: configured regex is invalid".into());
                 }
+            }
+        }
+        if let Some(v) = self.f_decimal.as_ref() {
+            if !v.is_finite() {
+                errors.push("f_decimal: value must be finite (NaN/Infinity rejected)".into());
+            }
+        }
+        if let Some(v) = self.f_double.as_ref() {
+            if !v.is_finite() {
+                errors.push("f_double: value must be finite (NaN/Infinity rejected)".into());
+            }
+        }
+        if let Some(v) = self.f_float.as_ref() {
+            if !v.is_finite() {
+                errors.push("f_float: value must be finite (NaN/Infinity rejected)".into());
             }
         }
         if let Some(v) = self.f_int.as_ref() {
@@ -224,9 +239,9 @@ impl CompTypesMatView {
         Ok(count as u64)
     }
 
-    /// Returns an approximate total number of rows in the table.
-    /// WARNING (SQLite): Uses `MAX(rowid)` which overestimates the count if rows have been deleted.
-    pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+    /// Returns an estimated count upper bound using `MAX(rowid)` (O(1)).
+    /// WARNING (SQLite): This overestimates the count if rows have been deleted.
+    pub async fn estimated_count_upper_bound<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         executor: E,
     ) -> sqlx::Result<u64> {
         let query = r#"SELECT MAX(rowid) FROM `comp_types_mat_view`"#;
@@ -295,6 +310,18 @@ impl CompTypesMatView {
     ) -> sqlx::Result<u64> {
         if items.is_empty() {
             return Ok(0);
+        }
+        for (idx, item) in items.iter().enumerate() {
+            if let Err(e) = item.validate() {
+                return Err(sqlx::Error::Protocol(
+                    format!(
+                        "insert_batch: item {} failed validation: {}",
+                        idx,
+                        e.join(", ")
+                    )
+                    .into(),
+                ));
+            }
         }
         let chunk_size = 32766 / 13;
         let mut total_affected = 0;

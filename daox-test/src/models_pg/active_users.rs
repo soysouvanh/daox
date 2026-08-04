@@ -36,7 +36,7 @@ impl ActiveUsersOrderBy {
 
 #[allow(clippy::all)]
 impl ActiveUsers {
-    #[allow(unused_comparisons)]
+    #[allow(unused_comparisons, unused_mut)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         #[cfg(not(feature = "validation"))]
         {

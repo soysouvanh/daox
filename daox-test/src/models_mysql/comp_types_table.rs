@@ -56,13 +56,28 @@ impl CompTypesTableOrderBy {
 
 #[allow(clippy::all)]
 impl CompTypesTable {
-    #[allow(unused_comparisons)]
+    #[allow(unused_comparisons, unused_mut)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         #[cfg(not(feature = "validation"))]
         {
             // Formats validation is disabled
         }
         let mut errors = Vec::new();
+        if let Some(v) = self.f_decimal.as_ref() {
+            if !v.is_finite() {
+                errors.push("f_decimal: value must be finite (NaN/Infinity rejected)".into());
+            }
+        }
+        if let Some(v) = self.f_double.as_ref() {
+            if !v.is_finite() {
+                errors.push("f_double: value must be finite (NaN/Infinity rejected)".into());
+            }
+        }
+        if let Some(v) = self.f_float.as_ref() {
+            if !v.is_finite() {
+                errors.push("f_float: value must be finite (NaN/Infinity rejected)".into());
+            }
+        }
         if let Some(v) = self.f_int.as_ref() {
             if (*v as i128) < (0 as i128) {
                 errors.push("f_int: minimum value '0' not met".into());
@@ -252,6 +267,18 @@ impl CompTypesTable {
         if items.is_empty() {
             return Ok(0);
         }
+        for (idx, item) in items.iter().enumerate() {
+            if let Err(e) = item.validate() {
+                return Err(sqlx::Error::Protocol(
+                    format!(
+                        "insert_batch: item {} failed validation: {}",
+                        idx,
+                        e.join(", ")
+                    )
+                    .into(),
+                ));
+            }
+        }
         let chunk_size = 65535 / 7;
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
@@ -309,6 +336,18 @@ impl CompTypesTable {
     ) -> sqlx::Result<u64> {
         if items.is_empty() {
             return Ok(0);
+        }
+        for (idx, item) in items.iter().enumerate() {
+            if let Err(e) = item.validate() {
+                return Err(sqlx::Error::Protocol(
+                    format!(
+                        "upsert_batch: item {} failed validation: {}",
+                        idx,
+                        e.join(", ")
+                    )
+                    .into(),
+                ));
+            }
         }
         let chunk_size = 65535 / 7;
         let mut total_affected = 0;
@@ -396,12 +435,86 @@ impl CompTypesTable {
         Ok(total_affected)
     }
 
-    #[allow(unused_assignments)]
+    #[allow(unused_assignments, unused_comparisons, unused_mut, unused_variables)]
     pub async fn update_partial_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         executor: E,
         id: i64,
         patch: &CompTypesTablePatch,
     ) -> sqlx::Result<u64> {
+        let mut errors: Vec<String> = Vec::new();
+        if let Some(val) = &patch.f_bool {
+            if let Some(v) = val.as_ref() {}
+        }
+        if let Some(val) = &patch.f_decimal {
+            if let Some(v) = val.as_ref() {
+                if !v.is_finite() {
+                    errors.push("f_decimal: value must be finite (NaN/Infinity rejected)".into());
+                }
+            }
+        }
+        if let Some(val) = &patch.f_double {
+            if let Some(v) = val.as_ref() {
+                if !v.is_finite() {
+                    errors.push("f_double: value must be finite (NaN/Infinity rejected)".into());
+                }
+            }
+        }
+        if let Some(val) = &patch.f_float {
+            if let Some(v) = val.as_ref() {
+                if !v.is_finite() {
+                    errors.push("f_float: value must be finite (NaN/Infinity rejected)".into());
+                }
+            }
+        }
+        if let Some(val) = &patch.f_int {
+            if let Some(v) = val.as_ref() {
+                if (*v as i128) < (0 as i128) {
+                    errors.push("f_int: minimum value '0' not met".into());
+                }
+                if (*v as i128) > (2147483647 as i128) {
+                    errors.push("f_int: exceeds max_value '2147483647'".into());
+                }
+            }
+        }
+        if let Some(val) = &patch.f_text {
+            if let Some(v) = val.as_ref() {
+                if v.len() > 65535 {
+                    errors.push("f_text: exceeds max_length 65535".into());
+                }
+                #[cfg(feature = "validation")]
+                {
+                    static RE: std::sync::OnceLock<Option<regex::Regex>> =
+                        std::sync::OnceLock::new();
+                    let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+                    if let Some(re) = re {
+                        if !re.is_match(v) {
+                            errors.push("f_text: format constraint not met".into());
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(val) = &patch.f_varchar {
+            if let Some(v) = val.as_ref() {
+                if v.len() > 255 {
+                    errors.push("f_varchar: exceeds max_length 255".into());
+                }
+                #[cfg(feature = "validation")]
+                {
+                    static RE: std::sync::OnceLock<Option<regex::Regex>> =
+                        std::sync::OnceLock::new();
+                    let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+                    if let Some(re) = re {
+                        if !re.is_match(v) {
+                            errors.push("f_varchar: format constraint not met".into());
+                        }
+                    }
+                }
+            }
+        }
+        if !errors.is_empty() {
+            return Err(sqlx::Error::Protocol(errors.join(", ").into()));
+        }
         let mut qb: sqlx::QueryBuilder<sqlx::MySql> =
             sqlx::QueryBuilder::new("UPDATE `comp_types_table` SET ");
         let mut first = true;

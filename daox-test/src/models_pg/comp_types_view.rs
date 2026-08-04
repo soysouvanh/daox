@@ -81,13 +81,28 @@ impl CompTypesViewOrderBy {
 
 #[allow(clippy::all)]
 impl CompTypesView {
-    #[allow(unused_comparisons)]
+    #[allow(unused_comparisons, unused_mut)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         #[cfg(not(feature = "validation"))]
         {
             // Formats validation is disabled
         }
         let mut errors = Vec::new();
+        if let Some(v) = self.f_decimal.as_ref() {
+            if !v.is_finite() {
+                errors.push("f_decimal: value must be finite (NaN/Infinity rejected)".into());
+            }
+        }
+        if let Some(v) = self.f_double.as_ref() {
+            if !v.is_finite() {
+                errors.push("f_double: value must be finite (NaN/Infinity rejected)".into());
+            }
+        }
+        if let Some(v) = self.f_float.as_ref() {
+            if !v.is_finite() {
+                errors.push("f_float: value must be finite (NaN/Infinity rejected)".into());
+            }
+        }
         if let Some(v) = self.f_int.as_ref() {
             if (*v as i128) < (0 as i128) {
                 errors.push("f_int: minimum value '0' not met".into());

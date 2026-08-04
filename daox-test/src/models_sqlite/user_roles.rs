@@ -31,7 +31,7 @@ impl UserRolesOrderBy {
 
 #[allow(clippy::all)]
 impl UserRoles {
-    #[allow(unused_comparisons)]
+    #[allow(unused_comparisons, unused_mut)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         #[cfg(not(feature = "validation"))]
         {
@@ -94,9 +94,9 @@ impl UserRoles {
         Ok(count as u64)
     }
 
-    /// Returns an approximate total number of rows in the table.
-    /// WARNING (SQLite): Uses `MAX(rowid)` which overestimates the count if rows have been deleted.
-    pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+    /// Returns an estimated count upper bound using `MAX(rowid)` (O(1)).
+    /// WARNING (SQLite): This overestimates the count if rows have been deleted.
+    pub async fn estimated_count_upper_bound<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         executor: E,
     ) -> sqlx::Result<u64> {
         let query = r#"SELECT MAX(rowid) FROM `user_roles`"#;
@@ -156,6 +156,18 @@ impl UserRoles {
     ) -> sqlx::Result<u64> {
         if items.is_empty() {
             return Ok(0);
+        }
+        for (idx, item) in items.iter().enumerate() {
+            if let Err(e) = item.validate() {
+                return Err(sqlx::Error::Protocol(
+                    format!(
+                        "insert_batch: item {} failed validation: {}",
+                        idx,
+                        e.join(", ")
+                    )
+                    .into(),
+                ));
+            }
         }
         let chunk_size = 32766 / 3;
         let mut total_affected = 0;

@@ -46,7 +46,7 @@ impl UsersOrderBy {
 
 #[allow(clippy::all)]
 impl Users {
-    #[allow(unused_comparisons)]
+    #[allow(unused_comparisons, unused_mut)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         #[cfg(not(feature = "validation"))]
         {
@@ -288,6 +288,18 @@ impl Users {
         if items.is_empty() {
             return Ok(0);
         }
+        for (idx, item) in items.iter().enumerate() {
+            if let Err(e) = item.validate() {
+                return Err(sqlx::Error::Protocol(
+                    format!(
+                        "insert_batch: item {} failed validation: {}",
+                        idx,
+                        e.join(", ")
+                    )
+                    .into(),
+                ));
+            }
+        }
         let chunk_size = 65535 / 5;
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
@@ -341,6 +353,18 @@ impl Users {
     ) -> sqlx::Result<u64> {
         if items.is_empty() {
             return Ok(0);
+        }
+        for (idx, item) in items.iter().enumerate() {
+            if let Err(e) = item.validate() {
+                return Err(sqlx::Error::Protocol(
+                    format!(
+                        "upsert_batch: item {} failed validation: {}",
+                        idx,
+                        e.join(", ")
+                    )
+                    .into(),
+                ));
+            }
         }
         let chunk_size = 65535 / 5;
         let mut total_affected = 0;
@@ -424,12 +448,96 @@ impl Users {
         Ok(total_affected)
     }
 
-    #[allow(unused_assignments)]
+    #[allow(unused_assignments, unused_comparisons, unused_mut, unused_variables)]
     pub async fn update_partial_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         executor: E,
         id: i64,
         patch: &UsersPatch,
     ) -> sqlx::Result<u64> {
+        let mut errors: Vec<String> = Vec::new();
+        if let Some(val) = &patch.created_at {
+            if let Some(v) = val.as_ref() {}
+        }
+        if let Some(val) = &patch.email {
+            if val.len() < 1 {
+                errors.push("email: min_length 1 not met".into());
+            }
+            if val.len() > 255 {
+                errors.push("email: exceeds max_length 255".into());
+            }
+            #[cfg(feature = "validation")]
+            {
+                static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+                let re = RE.get_or_init(|| {
+                    regex::Regex::new(
+                        "^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$",
+                    )
+                    .ok()
+                });
+                if let Some(re) = re {
+                    if !re.is_match(val) {
+                        errors.push("email: format constraint not met".into());
+                    }
+                }
+            }
+        }
+        if let Some(val) = &patch.first_name {
+            if let Some(v) = val.as_ref() {
+                if v.len() > 100 {
+                    errors.push("first_name: exceeds max_length 100".into());
+                }
+                #[cfg(feature = "validation")]
+                {
+                    static RE: std::sync::OnceLock<Option<regex::Regex>> =
+                        std::sync::OnceLock::new();
+                    let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+                    if let Some(re) = re {
+                        if !re.is_match(v) {
+                            errors.push("first_name: format constraint not met".into());
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(val) = &patch.last_name {
+            if val.len() < 1 {
+                errors.push("last_name: min_length 1 not met".into());
+            }
+            if val.len() > 100 {
+                errors.push("last_name: exceeds max_length 100".into());
+            }
+            #[cfg(feature = "validation")]
+            {
+                static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+                let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+                if let Some(re) = re {
+                    if !re.is_match(val) {
+                        errors.push("last_name: format constraint not met".into());
+                    }
+                }
+            }
+        }
+        if let Some(val) = &patch.status {
+            if val.len() < 1 {
+                errors.push("status: min_length 1 not met".into());
+            }
+            if val.len() > 50 {
+                errors.push("status: exceeds max_length 50".into());
+            }
+            #[cfg(feature = "validation")]
+            {
+                static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+                let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+                if let Some(re) = re {
+                    if !re.is_match(val) {
+                        errors.push("status: format constraint not met".into());
+                    }
+                }
+            }
+        }
+        if !errors.is_empty() {
+            return Err(sqlx::Error::Protocol(errors.join(", ").into()));
+        }
         let mut qb: sqlx::QueryBuilder<sqlx::MySql> =
             sqlx::QueryBuilder::new("UPDATE `users` SET ");
         let mut first = true;

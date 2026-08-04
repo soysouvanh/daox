@@ -36,7 +36,7 @@ impl ConfigurationsOrderBy {
 
 #[allow(clippy::all)]
 impl Configurations {
-    #[allow(unused_comparisons)]
+    #[allow(unused_comparisons, unused_mut)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         #[cfg(not(feature = "validation"))]
         {
@@ -129,9 +129,9 @@ impl Configurations {
         Ok(count as u64)
     }
 
-    /// Returns an approximate total number of rows in the table.
-    /// WARNING (SQLite): Uses `MAX(rowid)` which overestimates the count if rows have been deleted.
-    pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+    /// Returns an estimated count upper bound using `MAX(rowid)` (O(1)).
+    /// WARNING (SQLite): This overestimates the count if rows have been deleted.
+    pub async fn estimated_count_upper_bound<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         executor: E,
     ) -> sqlx::Result<u64> {
         let query = r#"SELECT MAX(rowid) FROM `configurations`"#;
@@ -228,6 +228,18 @@ impl Configurations {
         if items.is_empty() {
             return Ok(0);
         }
+        for (idx, item) in items.iter().enumerate() {
+            if let Err(e) = item.validate() {
+                return Err(sqlx::Error::Protocol(
+                    format!(
+                        "insert_batch: item {} failed validation: {}",
+                        idx,
+                        e.join(", ")
+                    )
+                    .into(),
+                ));
+            }
+        }
         let chunk_size = 32766 / 3;
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
@@ -277,6 +289,18 @@ impl Configurations {
     ) -> sqlx::Result<u64> {
         if items.is_empty() {
             return Ok(0);
+        }
+        for (idx, item) in items.iter().enumerate() {
+            if let Err(e) = item.validate() {
+                return Err(sqlx::Error::Protocol(
+                    format!(
+                        "upsert_batch: item {} failed validation: {}",
+                        idx,
+                        e.join(", ")
+                    )
+                    .into(),
+                ));
+            }
         }
         let chunk_size = 32766 / 3;
         let mut total_affected = 0;
@@ -357,12 +381,61 @@ impl Configurations {
         Ok(total_affected)
     }
 
-    #[allow(unused_assignments)]
+    #[allow(unused_assignments, unused_comparisons, unused_mut, unused_variables)]
     pub async fn update_partial_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         executor: E,
         id: i32,
         patch: &ConfigurationsPatch,
     ) -> sqlx::Result<u64> {
+        let mut errors: Vec<String> = Vec::new();
+        if let Some(val) = &patch.r#match {
+            if let Some(v) = val.as_ref() {
+                #[cfg(feature = "validation")]
+                {
+                    static RE: std::sync::OnceLock<Option<regex::Regex>> =
+                        std::sync::OnceLock::new();
+                    let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+                    if let Some(re) = re {
+                        if !re.is_match(v) {
+                            errors.push("r#match: format constraint not met".into());
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(val) = &patch.r#type {
+            if val.len() < 1 {
+                errors.push("r#type: min_length 1 not met".into());
+            }
+            #[cfg(feature = "validation")]
+            {
+                static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+                let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+                if let Some(re) = re {
+                    if !re.is_match(val) {
+                        errors.push("r#type: format constraint not met".into());
+                    }
+                }
+            }
+        }
+        if let Some(val) = &patch.value {
+            if let Some(v) = val.as_ref() {
+                #[cfg(feature = "validation")]
+                {
+                    static RE: std::sync::OnceLock<Option<regex::Regex>> =
+                        std::sync::OnceLock::new();
+                    let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+                    if let Some(re) = re {
+                        if !re.is_match(v) {
+                            errors.push("value: format constraint not met".into());
+                        }
+                    }
+                }
+            }
+        }
+        if !errors.is_empty() {
+            return Err(sqlx::Error::Protocol(errors.join(", ").into()));
+        }
         let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> =
             sqlx::QueryBuilder::new("UPDATE `configurations` SET ");
         let mut first = true;

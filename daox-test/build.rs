@@ -88,6 +88,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let sqlite_url = format!("sqlite://{}", sqlite_db_path);
     let sqlite_pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(std::time::Duration::from_secs(5))
         .connect(&sqlite_url)
         .await?;
 

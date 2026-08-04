@@ -31,7 +31,7 @@ impl OrderItemsOrderBy {
 
 #[allow(clippy::all)]
 impl OrderItems {
-    #[allow(unused_comparisons)]
+    #[allow(unused_comparisons, unused_mut)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         #[cfg(not(feature = "validation"))]
         {
@@ -190,6 +190,18 @@ impl OrderItems {
         if items.is_empty() {
             return Ok(0);
         }
+        for (idx, item) in items.iter().enumerate() {
+            if let Err(e) = item.validate() {
+                return Err(sqlx::Error::Protocol(
+                    format!(
+                        "insert_batch: item {} failed validation: {}",
+                        idx,
+                        e.join(", ")
+                    )
+                    .into(),
+                ));
+            }
+        }
         let mut copy_in = executor.copy_in_raw(r#"COPY "order_items" ("order_id", "product_id", "quantity") FROM STDIN WITH (FORMAT csv)"#).await?;
         for chunk in items.chunks(1000) {
             let est: usize = chunk
@@ -272,6 +284,18 @@ impl OrderItems {
         if items.is_empty() {
             return Ok(0);
         }
+        for (idx, item) in items.iter().enumerate() {
+            if let Err(e) = item.validate() {
+                return Err(sqlx::Error::Protocol(
+                    format!(
+                        "upsert_batch: item {} failed validation: {}",
+                        idx,
+                        e.join(", ")
+                    )
+                    .into(),
+                ));
+            }
+        }
         let chunk_size = 65535 / 3;
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
@@ -337,7 +361,7 @@ impl OrderItems {
         Ok(result.rows_affected())
     }
 
-    #[allow(unused_assignments)]
+    #[allow(unused_assignments, unused_comparisons, unused_mut, unused_variables)]
     pub async fn update_partial_by_order_id_and_product_id<
         'e,
         E: sqlx::Executor<'e, Database = sqlx::Postgres>,
@@ -347,6 +371,18 @@ impl OrderItems {
         product_id: i64,
         patch: &OrderItemsPatch,
     ) -> sqlx::Result<u64> {
+        let mut errors: Vec<String> = Vec::new();
+        if let Some(val) = &patch.quantity {
+            if (*val as i128) < (0 as i128) {
+                errors.push("quantity: minimum value '0' not met".into());
+            }
+            if (*val as i128) > (2147483647 as i128) {
+                errors.push("quantity: exceeds max_value '2147483647'".into());
+            }
+        }
+        if !errors.is_empty() {
+            return Err(sqlx::Error::Protocol(errors.join(", ").into()));
+        }
         let mut qb: sqlx::QueryBuilder<sqlx::Postgres> =
             sqlx::QueryBuilder::new("UPDATE \"order_items\" SET ");
         let mut first = true;

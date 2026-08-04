@@ -36,7 +36,7 @@ impl CompTypesActiveViewOrderBy {
 
 #[allow(clippy::all)]
 impl CompTypesActiveView {
-    #[allow(unused_comparisons)]
+    #[allow(unused_comparisons, unused_mut)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         #[cfg(not(feature = "validation"))]
         {

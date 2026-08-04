@@ -26,7 +26,7 @@ impl CurrenciesOrderBy {
 
 #[allow(clippy::all)]
 impl Currencies {
-    #[allow(unused_comparisons)]
+    #[allow(unused_comparisons, unused_mut)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         #[cfg(not(feature = "validation"))]
         {
@@ -207,6 +207,18 @@ impl Currencies {
         if items.is_empty() {
             return Ok(0);
         }
+        for (idx, item) in items.iter().enumerate() {
+            if let Err(e) = item.validate() {
+                return Err(sqlx::Error::Protocol(
+                    format!(
+                        "insert_batch: item {} failed validation: {}",
+                        idx,
+                        e.join(", ")
+                    )
+                    .into(),
+                ));
+            }
+        }
         let mut copy_in = executor
             .copy_in_raw(r#"COPY "currencies" ("code", "name") FROM STDIN WITH (FORMAT csv)"#)
             .await?;
@@ -300,6 +312,18 @@ impl Currencies {
         if items.is_empty() {
             return Ok(0);
         }
+        for (idx, item) in items.iter().enumerate() {
+            if let Err(e) = item.validate() {
+                return Err(sqlx::Error::Protocol(
+                    format!(
+                        "upsert_batch: item {} failed validation: {}",
+                        idx,
+                        e.join(", ")
+                    )
+                    .into(),
+                ));
+            }
+        }
         let chunk_size = 65535 / 2;
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
@@ -374,12 +398,34 @@ impl Currencies {
         Ok(total_affected)
     }
 
-    #[allow(unused_assignments)]
+    #[allow(unused_assignments, unused_comparisons, unused_mut, unused_variables)]
     pub async fn update_partial_by_code<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
         executor: E,
         code: &str,
         patch: &CurrenciesPatch,
     ) -> sqlx::Result<u64> {
+        let mut errors: Vec<String> = Vec::new();
+        if let Some(val) = &patch.name {
+            if val.len() < 1 {
+                errors.push("name: min_length 1 not met".into());
+            }
+            if val.len() > 50 {
+                errors.push("name: exceeds max_length 50".into());
+            }
+            #[cfg(feature = "validation")]
+            {
+                static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+                let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+                if let Some(re) = re {
+                    if !re.is_match(val) {
+                        errors.push("name: format constraint not met".into());
+                    }
+                }
+            }
+        }
+        if !errors.is_empty() {
+            return Err(sqlx::Error::Protocol(errors.join(", ").into()));
+        }
         let mut qb: sqlx::QueryBuilder<sqlx::Postgres> =
             sqlx::QueryBuilder::new("UPDATE \"currencies\" SET ");
         let mut first = true;

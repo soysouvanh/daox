@@ -36,7 +36,7 @@ impl ConfigurationsOrderBy {
 
 #[allow(clippy::all)]
 impl Configurations {
-    #[allow(unused_comparisons)]
+    #[allow(unused_comparisons, unused_mut)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         #[cfg(not(feature = "validation"))]
         {
@@ -239,6 +239,18 @@ impl Configurations {
         if items.is_empty() {
             return Ok(0);
         }
+        for (idx, item) in items.iter().enumerate() {
+            if let Err(e) = item.validate() {
+                return Err(sqlx::Error::Protocol(
+                    format!(
+                        "insert_batch: item {} failed validation: {}",
+                        idx,
+                        e.join(", ")
+                    )
+                    .into(),
+                ));
+            }
+        }
         let mut copy_in = executor
             .copy_in_raw(
                 r#"COPY "configurations" ("match", "type", "value") FROM STDIN WITH (FORMAT csv)"#,
@@ -347,6 +359,18 @@ impl Configurations {
         if items.is_empty() {
             return Ok(0);
         }
+        for (idx, item) in items.iter().enumerate() {
+            if let Err(e) = item.validate() {
+                return Err(sqlx::Error::Protocol(
+                    format!(
+                        "upsert_batch: item {} failed validation: {}",
+                        idx,
+                        e.join(", ")
+                    )
+                    .into(),
+                ));
+            }
+        }
         let chunk_size = 65535 / 3;
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
@@ -425,12 +449,67 @@ impl Configurations {
         Ok(total_affected)
     }
 
-    #[allow(unused_assignments)]
+    #[allow(unused_assignments, unused_comparisons, unused_mut, unused_variables)]
     pub async fn update_partial_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
         executor: E,
         id: i32,
         patch: &ConfigurationsPatch,
     ) -> sqlx::Result<u64> {
+        let mut errors: Vec<String> = Vec::new();
+        if let Some(val) = &patch.r#match {
+            if let Some(v) = val.as_ref() {
+                if v.len() > 255 {
+                    errors.push("r#match: exceeds max_length 255".into());
+                }
+                #[cfg(feature = "validation")]
+                {
+                    static RE: std::sync::OnceLock<Option<regex::Regex>> =
+                        std::sync::OnceLock::new();
+                    let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+                    if let Some(re) = re {
+                        if !re.is_match(v) {
+                            errors.push("r#match: format constraint not met".into());
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(val) = &patch.r#type {
+            if val.len() < 1 {
+                errors.push("r#type: min_length 1 not met".into());
+            }
+            if val.len() > 50 {
+                errors.push("r#type: exceeds max_length 50".into());
+            }
+            #[cfg(feature = "validation")]
+            {
+                static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+                let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+                if let Some(re) = re {
+                    if !re.is_match(val) {
+                        errors.push("r#type: format constraint not met".into());
+                    }
+                }
+            }
+        }
+        if let Some(val) = &patch.value {
+            if let Some(v) = val.as_ref() {
+                #[cfg(feature = "validation")]
+                {
+                    static RE: std::sync::OnceLock<Option<regex::Regex>> =
+                        std::sync::OnceLock::new();
+                    let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+                    if let Some(re) = re {
+                        if !re.is_match(v) {
+                            errors.push("value: format constraint not met".into());
+                        }
+                    }
+                }
+            }
+        }
+        if !errors.is_empty() {
+            return Err(sqlx::Error::Protocol(errors.join(", ").into()));
+        }
         let mut qb: sqlx::QueryBuilder<sqlx::Postgres> =
             sqlx::QueryBuilder::new("UPDATE \"configurations\" SET ");
         let mut first = true;

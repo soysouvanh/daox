@@ -222,7 +222,9 @@ Here is the Database-first approach visualized:
 - **SOTA Batch Operations & Upserts:** Deeply integrated, cross-dialect native `upserts` (using `ON CONFLICT` for PG/SQLite and `ON DUPLICATE KEY` for MySQL) ensuring scalable ACID atomicity effortlessly via `insert_batch`.
 - **Smart patching:** Send partial network updates (`update_partial_by_pk`) to save bandwidth and reduce database disk writes (WAL).
 - **Dialect-aware & injection safe:** Fully escapes reserved SQL keywords dynamically parsing context via `databases.toml`.
+- **Runtime Formats Validation:** Enforces data integrity in bulk inserts and updates by analyzing table schemas (using constraints like `min_length`, `enum`, regex, NaN/Infinity rejection). Call `.validate()` manually.
 - **Composite keys and Secondary Indexes:** Native support with highly scalable batch generation bindings for multiple primary keys, automatic `get_by_{index}`.
+- **O(1) Table counting:** Call `estimated_count_upper_bound()` to return an approximate table count using blazing fast internal database statistics (`MAX(rowid)`, `pg_class`, `information_schema.tables`).
 
 ### Advanced Interaction Models
 

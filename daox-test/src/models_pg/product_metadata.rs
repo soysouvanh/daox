@@ -36,7 +36,7 @@ impl ProductMetadataOrderBy {
 
 #[allow(clippy::all)]
 impl ProductMetadata {
-    #[allow(unused_comparisons)]
+    #[allow(unused_comparisons, unused_mut)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         #[cfg(not(feature = "validation"))]
         {
@@ -209,6 +209,18 @@ impl ProductMetadata {
         if items.is_empty() {
             return Ok(0);
         }
+        for (idx, item) in items.iter().enumerate() {
+            if let Err(e) = item.validate() {
+                return Err(sqlx::Error::Protocol(
+                    format!(
+                        "insert_batch: item {} failed validation: {}",
+                        idx,
+                        e.join(", ")
+                    )
+                    .into(),
+                ));
+            }
+        }
         let mut copy_in = executor.copy_in_raw(r#"COPY "product_metadata" ("attributes", "category", "id", "raw_data") FROM STDIN WITH (FORMAT csv)"#).await?;
         for chunk in items.chunks(1000) {
             let est: usize = chunk
@@ -328,6 +340,18 @@ impl ProductMetadata {
         if items.is_empty() {
             return Ok(0);
         }
+        for (idx, item) in items.iter().enumerate() {
+            if let Err(e) = item.validate() {
+                return Err(sqlx::Error::Protocol(
+                    format!(
+                        "upsert_batch: item {} failed validation: {}",
+                        idx,
+                        e.join(", ")
+                    )
+                    .into(),
+                ));
+            }
+        }
         let chunk_size = 65535 / 4;
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
@@ -407,12 +431,37 @@ impl ProductMetadata {
         Ok(total_affected)
     }
 
-    #[allow(unused_assignments)]
+    #[allow(unused_assignments, unused_comparisons, unused_mut, unused_variables)]
     pub async fn update_partial_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
         executor: E,
         id: &str,
         patch: &ProductMetadataPatch,
     ) -> sqlx::Result<u64> {
+        let mut errors: Vec<String> = Vec::new();
+        if let Some(val) = &patch.attributes {
+            if let Some(v) = val.as_ref() {}
+        }
+        if let Some(val) = &patch.category {
+            if val.len() < 1 {
+                errors.push("category: min_length 1 not met".into());
+            }
+            #[cfg(feature = "validation")]
+            {
+                static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+                let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+                if let Some(re) = re {
+                    if !re.is_match(val) {
+                        errors.push("category: format constraint not met".into());
+                    }
+                }
+            }
+        }
+        if let Some(val) = &patch.raw_data {
+            if let Some(v) = val.as_ref() {}
+        }
+        if !errors.is_empty() {
+            return Err(sqlx::Error::Protocol(errors.join(", ").into()));
+        }
         let mut qb: sqlx::QueryBuilder<sqlx::Postgres> =
             sqlx::QueryBuilder::new("UPDATE \"product_metadata\" SET ");
         let mut first = true;

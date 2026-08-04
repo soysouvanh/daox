@@ -34,7 +34,7 @@ serde_json = "1.0.151"
 
 [build-dependencies]
 # daox is used strictly as a build-dependency to GENERATE code during `cargo build`
-daox = { path = "../daox", version = "0.2.7" }
+daox = { path = "../daox", version = "0.2.8" }
 tokio = { version = "1", features = ["full"] }
 # SQLite is specifically initialized at compile-time directly in build.rs
 sqlx = { version = "0.9", features = ["sqlite", "runtime-tokio", "tls-rustls"] }
@@ -42,3 +42,4 @@ sqlx = { version = "0.9", features = ["sqlite", "runtime-tokio", "tls-rustls"] }
 [dev-dependencies]
 regex = "1"
 toml = "0.8"
+daox = { path = "../daox" }

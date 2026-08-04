@@ -740,7 +740,7 @@ mod symlink_write_protection_tests {
             std::os::unix::fs::symlink(&target, &link).unwrap();
             let meta = fs::symlink_metadata(&link).unwrap();
             assert!(meta.file_type().is_symlink());
-            // Le générateur devrait refuser d'écrire ici
+            assert!(daox::safe_write_if_changed(&link, b"malicious code").is_err());
         }
 
         let _ = fs::remove_dir_all(&tmp);
@@ -824,10 +824,9 @@ mod orphan_cleanup_security_tests {
             let link = orphan_dir.join("link_to_external");
             std::os::unix::fs::symlink(&external_dir, &link).unwrap();
 
-            // Après suppression sécurisée de orphan_dir,
-            // external_data/important.txt doit toujours exister
-            // (le test vérifie le concept, l'implémentation réelle
-            // utiliserait safe_remove_dir_all)
+            // Call the real safe_remove_dir_all
+            daox::safe_remove_dir_all(&orphan_dir).unwrap();
+
             assert!(external_dir.join("important.txt").exists());
         }
 
@@ -869,14 +868,8 @@ mod residual_fixes_tests {
 
     #[test]
     fn test_enum_toml_roundtrip_control_chars() {
-        let malicious_values = vec![
-            "val\0",
-            "val\nnewline",
-            "val\r\ttab",
-            "val\x7F",
-            "val🚀",
-        ];
-        
+        let malicious_values = vec!["val\0", "val\nnewline", "val\r\ttab", "val\x7F", "val🚀"];
+
         let mut root = toml::map::Map::new();
         let mut ev_section = toml::map::Map::new();
         let vals: Vec<toml::Value> = malicious_values
@@ -886,10 +879,18 @@ mod residual_fixes_tests {
         ev_section.insert("value".into(), toml::Value::Array(vals));
         root.insert("enum_values".into(), toml::Value::Table(ev_section));
 
-        let serialized = toml::to_string_pretty(&toml::Value::Table(root)).expect("Failed to serialize with control chars");
-        let parsed: toml::Value = toml::from_str(&serialized).expect("Failed to parse back valid TOML");
-        
-        let arr = parsed.get("enum_values").unwrap().get("value").unwrap().as_array().unwrap();
+        let serialized = toml::to_string_pretty(&toml::Value::Table(root))
+            .expect("Failed to serialize with control chars");
+        let parsed: toml::Value =
+            toml::from_str(&serialized).expect("Failed to parse back valid TOML");
+
+        let arr = parsed
+            .get("enum_values")
+            .unwrap()
+            .get("value")
+            .unwrap()
+            .as_array()
+            .unwrap();
         assert_eq!(arr.len(), malicious_values.len());
         for (i, val) in malicious_values.iter().enumerate() {
             assert_eq!(arr[i].as_str().unwrap(), *val);
@@ -916,17 +917,185 @@ mod residual_fixes_tests {
             std::os::unix::fs::symlink(&target_dir, &link).unwrap();
             let meta = fs::symlink_metadata(&link).unwrap();
             assert!(meta.file_type().is_symlink());
-            
-            // Simulation of safe_remove_dir_all
-            if meta.file_type().is_symlink() {
-                fs::remove_file(&link).unwrap();
-            }
-            
+
+            // Call the real safe_remove_dir_all
+            daox::safe_remove_dir_all(&link).unwrap();
+
             // The target directory must still exist and contain the file
             assert!(target_dir.exists());
-            assert_eq!(fs::read_to_string(target_dir.join("file.txt")).unwrap(), "keep");
+            assert_eq!(
+                fs::read_to_string(target_dir.join("file.txt")).unwrap(),
+                "keep"
+            );
         }
 
         let _ = fs::remove_dir_all(&tmp);
+    }
+}
+
+#[cfg(test)]
+mod dangling_symlink_tests {
+    use std::fs;
+
+    #[test]
+    fn test_dangling_symlink_rejected() {
+        let tmp = std::env::temp_dir().join("daox_sec_test_dangling_symlink");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let link = tmp.join("generated.rs");
+        let nonexistent_target = tmp.join("nonexistent_target.rs");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&nonexistent_target, &link).unwrap();
+
+            assert!(
+                fs::symlink_metadata(&link)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink()
+            );
+            assert!(!nonexistent_target.exists());
+
+            let result = daox::safe_write_if_changed(&link, b"malicious code");
+            assert!(result.is_err(), "Must reject dangling symlink");
+
+            assert!(!nonexistent_target.exists());
+        }
+        let _ = fs::remove_dir_all(&tmp);
+    }
+}
+
+#[cfg(test)]
+mod databases_toml_size_tests {
+    use std::fs;
+    #[test]
+    fn test_oversized_databases_toml_rejected() {
+        let tmp = std::env::temp_dir().join("daox_sec_test_databases_size");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let path = tmp.join("databases.toml");
+        let oversized = format!(
+            "[default]\ndialect = \"mysql\"\n# {}\n",
+            "x".repeat(2 * 1024 * 1024)
+        );
+        fs::write(&path, &oversized).unwrap();
+
+        let result = daox::read_toml_file_limited(&path);
+        assert!(result.is_err(), "Must reject file > 1MB");
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+}
+
+#[cfg(test)]
+mod partial_update_validation_tests {
+    #[tokio::test]
+    async fn test_update_partial_rejects_invalid_patch() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+
+        sqlx::query("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, last_name TEXT NOT NULL, first_name TEXT, status TEXT NOT NULL, created_at TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let patch = crate::models_sqlite::UsersPatch {
+            email: None,
+            last_name: Some(String::from("")),
+            first_name: None,
+            status: None,
+            created_at: None,
+        };
+
+        let result = crate::models_sqlite::Users::update_partial_by_id(&pool, 1, &patch).await;
+        assert!(
+            result.is_err(),
+            "update_partial must reject invalid patch values"
+        );
+    }
+}
+
+#[cfg(test)]
+mod nan_infinity_tests {
+    #[test]
+    fn test_validate_rejects_nan() {
+        let item = crate::models_sqlite::CompTypesTable {
+            id: 0,
+            f_bool: None,
+            f_decimal: Some(f64::NAN),
+            f_double: None,
+            f_float: None,
+            f_int: None,
+            f_text: None,
+            f_varchar: None,
+        };
+        let result = item.validate();
+        assert!(result.is_err(), "validate() must reject NaN");
+    }
+
+    #[test]
+    fn test_validate_rejects_infinity() {
+        let item = crate::models_sqlite::CompTypesTable {
+            id: 0,
+            f_bool: None,
+            f_decimal: Some(f64::INFINITY),
+            f_double: None,
+            f_float: None,
+            f_int: None,
+            f_text: None,
+            f_varchar: None,
+        };
+        let result = item.validate();
+        assert!(result.is_err(), "validate() must reject Infinity");
+    }
+}
+
+#[cfg(test)]
+mod enum_malformed_tests {
+    #[test]
+    fn test_malformed_enum_fallback() {
+        let malformed = "ENUM('a', 'b";
+        let result = daox::parse_mysql_enum(malformed);
+        match result {
+            Ok(vals) => assert!(
+                !vals.is_empty(),
+                "Malformed ENUM should not produce empty vec silently"
+            ),
+            Err(_) => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod batch_validation_tests {
+    #[tokio::test]
+    async fn test_insert_batch_rejects_invalid_items() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+
+        sqlx::query("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, last_name TEXT NOT NULL, first_name TEXT, status TEXT NOT NULL, created_at TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+
+        let invalid_user = crate::models_sqlite::Users {
+            id: 0,
+            email: String::from(""), // Invlaid, min_length >= 1
+            last_name: String::from(""),
+            first_name: None,
+            status: String::from(""),
+            created_at: None,
+        };
+
+        let result = crate::models_sqlite::Users::insert_batch(&mut tx, &[invalid_user]).await;
+        assert!(result.is_err(), "insert_batch must reject invalid items");
     }
 }

@@ -81,7 +81,7 @@ impl CompTypesMatViewOrderBy {
 
 #[allow(clippy::all)]
 impl CompTypesMatView {
-    #[allow(unused_comparisons)]
+    #[allow(unused_comparisons, unused_mut)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         #[cfg(not(feature = "validation"))]
         {
@@ -91,6 +91,21 @@ impl CompTypesMatView {
         if let Some(v) = self.f_blob.as_ref() {
             if v.len() > 65535 {
                 errors.push("f_blob: exceeds max_length 65535".into());
+            }
+        }
+        if let Some(v) = self.f_decimal.as_ref() {
+            if !v.is_finite() {
+                errors.push("f_decimal: value must be finite (NaN/Infinity rejected)".into());
+            }
+        }
+        if let Some(v) = self.f_double.as_ref() {
+            if !v.is_finite() {
+                errors.push("f_double: value must be finite (NaN/Infinity rejected)".into());
+            }
+        }
+        if let Some(v) = self.f_float.as_ref() {
+            if !v.is_finite() {
+                errors.push("f_float: value must be finite (NaN/Infinity rejected)".into());
             }
         }
         if let Some(v) = self.f_int.as_ref() {
@@ -265,6 +280,18 @@ impl CompTypesMatView {
     ) -> sqlx::Result<u64> {
         if items.is_empty() {
             return Ok(0);
+        }
+        for (idx, item) in items.iter().enumerate() {
+            if let Err(e) = item.validate() {
+                return Err(sqlx::Error::Protocol(
+                    format!(
+                        "insert_batch: item {} failed validation: {}",
+                        idx,
+                        e.join(", ")
+                    )
+                    .into(),
+                ));
+            }
         }
         let chunk_size = 65535 / 13;
         let mut total_affected = 0;
