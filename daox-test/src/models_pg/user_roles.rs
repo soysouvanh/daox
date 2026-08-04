@@ -95,8 +95,11 @@ impl UserRoles {
     pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT reltuples::bigint FROM pg_class WHERE relname = 'user_roles'"#;
-        let count: Option<(i64,)> = sqlx::query_as(query).fetch_optional(executor).await?;
+        let query = r#"SELECT reltuples::bigint FROM pg_class WHERE relname = $1"#;
+        let count: Option<(i64,)> = sqlx::query_as(query)
+            .bind("user_roles")
+            .fetch_optional(executor)
+            .await?;
         Ok(count.map(|(c,)| c.max(0) as u64).unwrap_or(0))
     }
 
@@ -203,6 +206,57 @@ impl UserRoles {
         Ok(items.len() as u64)
     }
 
+    pub async fn get_by_user_id_and_role_name<
+        'e,
+        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+    >(
+        executor: E,
+        user_id: i64,
+        role_name: &str,
+    ) -> sqlx::Result<Option<Self>> {
+        let query = r#"SELECT "assigned_at", "role_name", "user_id" FROM "user_roles" WHERE "user_id" = $1 AND "role_name" = $2"#;
+        sqlx::query_as::<_, Self>(query)
+            .bind(user_id)
+            .bind(role_name)
+            .fetch_optional(executor)
+            .await
+    }
+
+    pub async fn exists_by_user_id_and_role_name<
+        'e,
+        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+    >(
+        executor: E,
+        user_id: i64,
+        role_name: &str,
+    ) -> sqlx::Result<bool> {
+        let query =
+            r#"SELECT 1 FROM "user_roles" WHERE "user_id" = $1 AND "role_name" = $2 LIMIT 1"#;
+        let exists: Option<(i32,)> = sqlx::query_as(query)
+            .bind(user_id)
+            .bind(role_name)
+            .fetch_optional(executor)
+            .await?;
+        Ok(exists.is_some())
+    }
+
+    pub async fn delete_by_user_id_and_role_name<
+        'e,
+        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+    >(
+        executor: E,
+        user_id: i64,
+        role_name: &str,
+    ) -> sqlx::Result<u64> {
+        let query = r#"DELETE FROM "user_roles" WHERE "user_id" = $1 AND "role_name" = $2"#;
+        let result = sqlx::query::<sqlx::Postgres>(query)
+            .bind(user_id)
+            .bind(role_name)
+            .execute(executor)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
     pub async fn list_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
         executor: E,
         user_id: i64,
@@ -256,57 +310,6 @@ impl UserRoles {
         let query = r#"DELETE FROM "user_roles" WHERE "user_id" = $1"#;
         let result = sqlx::query::<sqlx::Postgres>(query)
             .bind(user_id)
-            .execute(executor)
-            .await?;
-        Ok(result.rows_affected())
-    }
-
-    pub async fn get_by_user_id_and_role_name<
-        'e,
-        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
-    >(
-        executor: E,
-        user_id: i64,
-        role_name: &str,
-    ) -> sqlx::Result<Option<Self>> {
-        let query = r#"SELECT "assigned_at", "role_name", "user_id" FROM "user_roles" WHERE "user_id" = $1 AND "role_name" = $2"#;
-        sqlx::query_as::<_, Self>(query)
-            .bind(user_id)
-            .bind(role_name)
-            .fetch_optional(executor)
-            .await
-    }
-
-    pub async fn exists_by_user_id_and_role_name<
-        'e,
-        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
-    >(
-        executor: E,
-        user_id: i64,
-        role_name: &str,
-    ) -> sqlx::Result<bool> {
-        let query =
-            r#"SELECT 1 FROM "user_roles" WHERE "user_id" = $1 AND "role_name" = $2 LIMIT 1"#;
-        let exists: Option<(i32,)> = sqlx::query_as(query)
-            .bind(user_id)
-            .bind(role_name)
-            .fetch_optional(executor)
-            .await?;
-        Ok(exists.is_some())
-    }
-
-    pub async fn delete_by_user_id_and_role_name<
-        'e,
-        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
-    >(
-        executor: E,
-        user_id: i64,
-        role_name: &str,
-    ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM "user_roles" WHERE "user_id" = $1 AND "role_name" = $2"#;
-        let result = sqlx::query::<sqlx::Postgres>(query)
-            .bind(user_id)
-            .bind(role_name)
             .execute(executor)
             .await?;
         Ok(result.rows_affected())

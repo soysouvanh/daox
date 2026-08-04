@@ -7,13 +7,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=../.env");
 
+    // P-005: Only allow known-safe env var prefixes to prevent injection
+    const ALLOWED_ENV_PREFIXES: &[&str] = &["DATABASE_URL", "DAOX_"];
     if let Ok(content) = std::fs::read_to_string("../.env") {
         for line in content.lines() {
             let line = line.trim();
             if !line.is_empty() && !line.starts_with('#') {
                 if let Some((k, v)) = line.split_once('=') {
-                    unsafe {
-                        std::env::set_var(k.trim(), v.trim().trim_matches('"'));
+                    let key = k.trim();
+                    if ALLOWED_ENV_PREFIXES.iter().any(|p| key.starts_with(p)) {
+                        // Safe: build scripts are single-threaded at this point
+                        unsafe {
+                            std::env::set_var(key, v.trim().trim_matches('"'));
+                        }
+                    } else {
+                        println!("cargo:warning=Daox: ignoring unexpected env var: {}", key);
                     }
                 }
             }

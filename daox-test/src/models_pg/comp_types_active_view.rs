@@ -105,9 +105,11 @@ impl CompTypesActiveView {
     pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query =
-            r#"SELECT reltuples::bigint FROM pg_class WHERE relname = 'comp_types_active_view'"#;
-        let count: Option<(i64,)> = sqlx::query_as(query).fetch_optional(executor).await?;
+        let query = r#"SELECT reltuples::bigint FROM pg_class WHERE relname = $1"#;
+        let count: Option<(i64,)> = sqlx::query_as(query)
+            .bind("comp_types_active_view")
+            .fetch_optional(executor)
+            .await?;
         Ok(count.map(|(c,)| c.max(0) as u64).unwrap_or(0))
     }
 

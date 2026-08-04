@@ -95,8 +95,11 @@ impl OrderItems {
     pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT reltuples::bigint FROM pg_class WHERE relname = 'order_items'"#;
-        let count: Option<(i64,)> = sqlx::query_as(query).fetch_optional(executor).await?;
+        let query = r#"SELECT reltuples::bigint FROM pg_class WHERE relname = $1"#;
+        let count: Option<(i64,)> = sqlx::query_as(query)
+            .bind("order_items")
+            .fetch_optional(executor)
+            .await?;
         Ok(count.map(|(c,)| c.max(0) as u64).unwrap_or(0))
     }
 
@@ -335,40 +338,25 @@ impl OrderItems {
         product_id: i64,
         patch: &OrderItemsPatch,
     ) -> sqlx::Result<u64> {
-        let mut set_clauses: Vec<String> = Vec::new();
-        let mut _param_idx = 1usize;
-        if patch.quantity.is_some() {
-            set_clauses.push(format!("\"quantity\" = ${}", _param_idx));
-            _param_idx += 1;
+        let mut qb: sqlx::QueryBuilder<sqlx::Postgres> =
+            sqlx::QueryBuilder::new("UPDATE \"order_items\" SET ");
+        let mut first = true;
+        if let Some(val) = &patch.quantity {
+            if !first {
+                qb.push(", ");
+            }
+            qb.push("\"quantity\" = ");
+            qb.push_bind(val.clone());
+            first = false;
         }
-        if set_clauses.is_empty() {
+        if first {
             return Ok(0);
         }
-        let mut query_str = format!("UPDATE \"order_items\" SET {}", set_clauses.join(", "));
-        query_str.push_str(&format!(" WHERE \"order_id\" = ${}", _param_idx));
-        _param_idx += 1;
-        query_str.push_str(&format!(" AND \"product_id\" = ${}", _param_idx));
-        _param_idx += 1;
-        static CACHE: std::sync::OnceLock<
-            std::sync::RwLock<std::collections::HashMap<String, &'static str>>,
-        > = std::sync::OnceLock::new();
-        let cache = CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()));
-        let safe_query_str: &'static str = {
-            if let Some(s) = cache.read().unwrap().get(&query_str) {
-                *s
-            } else {
-                let leaked = Box::leak(query_str.clone().into_boxed_str());
-                cache.write().unwrap().insert(query_str, leaked);
-                leaked
-            }
-        };
-        let mut query = sqlx::query::<sqlx::Postgres>(safe_query_str);
-        if let Some(val) = &patch.quantity {
-            query = query.bind(val);
-        }
-        query = query.bind(order_id);
-        query = query.bind(product_id);
-        let result = query.execute(executor).await?;
+        qb.push(" WHERE \"order_id\" = ");
+        qb.push_bind(order_id);
+        qb.push(" AND \"product_id\" = ");
+        qb.push_bind(product_id);
+        let result = qb.build().execute(executor).await?;
         Ok(result.rows_affected())
     }
 }

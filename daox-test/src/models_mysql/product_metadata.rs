@@ -60,7 +60,7 @@ impl ProductMetadata {
             }
         }
         if let Some(v) = Some(&self.category) {
-            let valid_enums = ["tech", "food", "books"];
+            let valid_enums = ["tech,food,books"];
             if !valid_enums.contains(&v.as_str()) {
                 errors.push("category: invalid enum value".into());
             }
@@ -69,7 +69,7 @@ impl ProductMetadata {
         if let Some(v) = Some(&self.category) {
             static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
             let re = RE.get_or_init(|| {
-                regex::Regex::new("^(tech|food|books)$").expect("Invalid regex in TOML")
+                regex::Regex::new("^(tech,food,books)$").expect("Invalid regex in TOML")
             });
             if !re.is_match(v) {
                 errors.push("category: format constraint not met".into());
@@ -121,8 +121,11 @@ impl ProductMetadata {
     pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT table_rows FROM information_schema.tables WHERE table_name = 'product_metadata' AND table_schema = DATABASE()"#;
-        let count: Option<(i64,)> = sqlx::query_as(query).fetch_optional(executor).await?;
+        let query = r#"SELECT table_rows FROM information_schema.tables WHERE table_name = ? AND table_schema = DATABASE()"#;
+        let count: Option<(i64,)> = sqlx::query_as(query)
+            .bind("product_metadata")
+            .fetch_optional(executor)
+            .await?;
         Ok(count.map(|(c,)| c.max(0) as u64).unwrap_or(0))
     }
 
@@ -344,51 +347,39 @@ impl ProductMetadata {
         id: &[u8],
         patch: &ProductMetadataPatch,
     ) -> sqlx::Result<u64> {
-        let mut set_clauses: Vec<String> = Vec::new();
-        let mut _param_idx = 1usize;
-        if patch.attributes.is_some() {
-            set_clauses.push("`attributes` = ?".to_string());
-            _param_idx += 1;
-        }
-        if patch.category.is_some() {
-            set_clauses.push("`category` = ?".to_string());
-            _param_idx += 1;
-        }
-        if patch.raw_data.is_some() {
-            set_clauses.push("`raw_data` = ?".to_string());
-            _param_idx += 1;
-        }
-        if set_clauses.is_empty() {
-            return Ok(0);
-        }
-        let mut query_str = format!("UPDATE `product_metadata` SET {}", set_clauses.join(", "));
-        query_str.push_str(" WHERE `id` = ?");
-        _param_idx += 1;
-        static CACHE: std::sync::OnceLock<
-            std::sync::RwLock<std::collections::HashMap<String, &'static str>>,
-        > = std::sync::OnceLock::new();
-        let cache = CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()));
-        let safe_query_str: &'static str = {
-            if let Some(s) = cache.read().unwrap().get(&query_str) {
-                *s
-            } else {
-                let leaked = Box::leak(query_str.clone().into_boxed_str());
-                cache.write().unwrap().insert(query_str, leaked);
-                leaked
-            }
-        };
-        let mut query = sqlx::query::<sqlx::MySql>(safe_query_str);
+        let mut qb: sqlx::QueryBuilder<sqlx::MySql> =
+            sqlx::QueryBuilder::new("UPDATE `product_metadata` SET ");
+        let mut first = true;
         if let Some(val) = &patch.attributes {
-            query = query.bind(val);
+            if !first {
+                qb.push(", ");
+            }
+            qb.push("`attributes` = ");
+            qb.push_bind(val.clone());
+            first = false;
         }
         if let Some(val) = &patch.category {
-            query = query.bind(val);
+            if !first {
+                qb.push(", ");
+            }
+            qb.push("`category` = ");
+            qb.push_bind(val.clone());
+            first = false;
         }
         if let Some(val) = &patch.raw_data {
-            query = query.bind(val);
+            if !first {
+                qb.push(", ");
+            }
+            qb.push("`raw_data` = ");
+            qb.push_bind(val.clone());
+            first = false;
         }
-        query = query.bind(id);
-        let result = query.execute(executor).await?;
+        if first {
+            return Ok(0);
+        }
+        qb.push(" WHERE `id` = ");
+        qb.push_bind(id);
+        let result = qb.build().execute(executor).await?;
         Ok(result.rows_affected())
     }
 }

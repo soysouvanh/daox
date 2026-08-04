@@ -105,8 +105,11 @@ impl CompTypesActiveView {
     pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT table_rows FROM information_schema.tables WHERE table_name = 'comp_types_active_view' AND table_schema = DATABASE()"#;
-        let count: Option<(i64,)> = sqlx::query_as(query).fetch_optional(executor).await?;
+        let query = r#"SELECT table_rows FROM information_schema.tables WHERE table_name = ? AND table_schema = DATABASE()"#;
+        let count: Option<(i64,)> = sqlx::query_as(query)
+            .bind("comp_types_active_view")
+            .fetch_optional(executor)
+            .await?;
         Ok(count.map(|(c,)| c.max(0) as u64).unwrap_or(0))
     }
 

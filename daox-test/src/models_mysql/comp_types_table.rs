@@ -140,8 +140,11 @@ impl CompTypesTable {
     pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT table_rows FROM information_schema.tables WHERE table_name = 'comp_types_table' AND table_schema = DATABASE()"#;
-        let count: Option<(i64,)> = sqlx::query_as(query).fetch_optional(executor).await?;
+        let query = r#"SELECT table_rows FROM information_schema.tables WHERE table_name = ? AND table_schema = DATABASE()"#;
+        let count: Option<(i64,)> = sqlx::query_as(query)
+            .bind("comp_types_table")
+            .fetch_optional(executor)
+            .await?;
         Ok(count.map(|(c,)| c.max(0) as u64).unwrap_or(0))
     }
 
@@ -379,79 +382,71 @@ impl CompTypesTable {
         id: i64,
         patch: &CompTypesTablePatch,
     ) -> sqlx::Result<u64> {
-        let mut set_clauses: Vec<String> = Vec::new();
-        let mut _param_idx = 1usize;
-        if patch.f_bool.is_some() {
-            set_clauses.push("`f_bool` = ?".to_string());
-            _param_idx += 1;
-        }
-        if patch.f_decimal.is_some() {
-            set_clauses.push("`f_decimal` = ?".to_string());
-            _param_idx += 1;
-        }
-        if patch.f_double.is_some() {
-            set_clauses.push("`f_double` = ?".to_string());
-            _param_idx += 1;
-        }
-        if patch.f_float.is_some() {
-            set_clauses.push("`f_float` = ?".to_string());
-            _param_idx += 1;
-        }
-        if patch.f_int.is_some() {
-            set_clauses.push("`f_int` = ?".to_string());
-            _param_idx += 1;
-        }
-        if patch.f_text.is_some() {
-            set_clauses.push("`f_text` = ?".to_string());
-            _param_idx += 1;
-        }
-        if patch.f_varchar.is_some() {
-            set_clauses.push("`f_varchar` = ?".to_string());
-            _param_idx += 1;
-        }
-        if set_clauses.is_empty() {
-            return Ok(0);
-        }
-        let mut query_str = format!("UPDATE `comp_types_table` SET {}", set_clauses.join(", "));
-        query_str.push_str(" WHERE `id` = ?");
-        _param_idx += 1;
-        static CACHE: std::sync::OnceLock<
-            std::sync::RwLock<std::collections::HashMap<String, &'static str>>,
-        > = std::sync::OnceLock::new();
-        let cache = CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()));
-        let safe_query_str: &'static str = {
-            if let Some(s) = cache.read().unwrap().get(&query_str) {
-                *s
-            } else {
-                let leaked = Box::leak(query_str.clone().into_boxed_str());
-                cache.write().unwrap().insert(query_str, leaked);
-                leaked
-            }
-        };
-        let mut query = sqlx::query::<sqlx::MySql>(safe_query_str);
+        let mut qb: sqlx::QueryBuilder<sqlx::MySql> =
+            sqlx::QueryBuilder::new("UPDATE `comp_types_table` SET ");
+        let mut first = true;
         if let Some(val) = &patch.f_bool {
-            query = query.bind(val);
+            if !first {
+                qb.push(", ");
+            }
+            qb.push("`f_bool` = ");
+            qb.push_bind(val.clone());
+            first = false;
         }
         if let Some(val) = &patch.f_decimal {
-            query = query.bind(val);
+            if !first {
+                qb.push(", ");
+            }
+            qb.push("`f_decimal` = ");
+            qb.push_bind(val.clone());
+            first = false;
         }
         if let Some(val) = &patch.f_double {
-            query = query.bind(val);
+            if !first {
+                qb.push(", ");
+            }
+            qb.push("`f_double` = ");
+            qb.push_bind(val.clone());
+            first = false;
         }
         if let Some(val) = &patch.f_float {
-            query = query.bind(val);
+            if !first {
+                qb.push(", ");
+            }
+            qb.push("`f_float` = ");
+            qb.push_bind(val.clone());
+            first = false;
         }
         if let Some(val) = &patch.f_int {
-            query = query.bind(val);
+            if !first {
+                qb.push(", ");
+            }
+            qb.push("`f_int` = ");
+            qb.push_bind(val.clone());
+            first = false;
         }
         if let Some(val) = &patch.f_text {
-            query = query.bind(val);
+            if !first {
+                qb.push(", ");
+            }
+            qb.push("`f_text` = ");
+            qb.push_bind(val.clone());
+            first = false;
         }
         if let Some(val) = &patch.f_varchar {
-            query = query.bind(val);
+            if !first {
+                qb.push(", ");
+            }
+            qb.push("`f_varchar` = ");
+            qb.push_bind(val.clone());
+            first = false;
         }
-        query = query.bind(id);
-        let result = query.execute(executor).await?;
+        if first {
+            return Ok(0);
+        }
+        qb.push(" WHERE `id` = ");
+        qb.push_bind(id);
+        let result = qb.build().execute(executor).await?;
         Ok(result.rows_affected())
     }
 }

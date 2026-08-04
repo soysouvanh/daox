@@ -100,8 +100,11 @@ impl Currencies {
     pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT reltuples::bigint FROM pg_class WHERE relname = 'currencies'"#;
-        let count: Option<(i64,)> = sqlx::query_as(query).fetch_optional(executor).await?;
+        let query = r#"SELECT reltuples::bigint FROM pg_class WHERE relname = $1"#;
+        let count: Option<(i64,)> = sqlx::query_as(query)
+            .bind("currencies")
+            .fetch_optional(executor)
+            .await?;
         Ok(count.map(|(c,)| c.max(0) as u64).unwrap_or(0))
     }
 
@@ -357,37 +360,23 @@ impl Currencies {
         code: &str,
         patch: &CurrenciesPatch,
     ) -> sqlx::Result<u64> {
-        let mut set_clauses: Vec<String> = Vec::new();
-        let mut _param_idx = 1usize;
-        if patch.name.is_some() {
-            set_clauses.push(format!("\"name\" = ${}", _param_idx));
-            _param_idx += 1;
+        let mut qb: sqlx::QueryBuilder<sqlx::Postgres> =
+            sqlx::QueryBuilder::new("UPDATE \"currencies\" SET ");
+        let mut first = true;
+        if let Some(val) = &patch.name {
+            if !first {
+                qb.push(", ");
+            }
+            qb.push("\"name\" = ");
+            qb.push_bind(val.clone());
+            first = false;
         }
-        if set_clauses.is_empty() {
+        if first {
             return Ok(0);
         }
-        let mut query_str = format!("UPDATE \"currencies\" SET {}", set_clauses.join(", "));
-        query_str.push_str(&format!(" WHERE \"code\" = ${}", _param_idx));
-        _param_idx += 1;
-        static CACHE: std::sync::OnceLock<
-            std::sync::RwLock<std::collections::HashMap<String, &'static str>>,
-        > = std::sync::OnceLock::new();
-        let cache = CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()));
-        let safe_query_str: &'static str = {
-            if let Some(s) = cache.read().unwrap().get(&query_str) {
-                *s
-            } else {
-                let leaked = Box::leak(query_str.clone().into_boxed_str());
-                cache.write().unwrap().insert(query_str, leaked);
-                leaked
-            }
-        };
-        let mut query = sqlx::query::<sqlx::Postgres>(safe_query_str);
-        if let Some(val) = &patch.name {
-            query = query.bind(val);
-        }
-        query = query.bind(code);
-        let result = query.execute(executor).await?;
+        qb.push(" WHERE \"code\" = ");
+        qb.push_bind(code);
+        let result = qb.build().execute(executor).await?;
         Ok(result.rows_affected())
     }
 }

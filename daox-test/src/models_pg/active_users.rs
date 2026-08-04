@@ -126,8 +126,11 @@ impl ActiveUsers {
     pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT reltuples::bigint FROM pg_class WHERE relname = 'active_users'"#;
-        let count: Option<(i64,)> = sqlx::query_as(query).fetch_optional(executor).await?;
+        let query = r#"SELECT reltuples::bigint FROM pg_class WHERE relname = $1"#;
+        let count: Option<(i64,)> = sqlx::query_as(query)
+            .bind("active_users")
+            .fetch_optional(executor)
+            .await?;
         Ok(count.map(|(c,)| c.max(0) as u64).unwrap_or(0))
     }
 

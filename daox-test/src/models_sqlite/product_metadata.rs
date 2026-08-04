@@ -336,51 +336,39 @@ impl ProductMetadata {
         id: &str,
         patch: &ProductMetadataPatch,
     ) -> sqlx::Result<u64> {
-        let mut set_clauses: Vec<String> = Vec::new();
-        let mut _param_idx = 1usize;
-        if patch.attributes.is_some() {
-            set_clauses.push("`attributes` = ?".to_string());
-            _param_idx += 1;
-        }
-        if patch.category.is_some() {
-            set_clauses.push("`category` = ?".to_string());
-            _param_idx += 1;
-        }
-        if patch.raw_data.is_some() {
-            set_clauses.push("`raw_data` = ?".to_string());
-            _param_idx += 1;
-        }
-        if set_clauses.is_empty() {
-            return Ok(0);
-        }
-        let mut query_str = format!("UPDATE `product_metadata` SET {}", set_clauses.join(", "));
-        query_str.push_str(" WHERE `id` = ?");
-        _param_idx += 1;
-        static CACHE: std::sync::OnceLock<
-            std::sync::RwLock<std::collections::HashMap<String, &'static str>>,
-        > = std::sync::OnceLock::new();
-        let cache = CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()));
-        let safe_query_str: &'static str = {
-            if let Some(s) = cache.read().unwrap().get(&query_str) {
-                *s
-            } else {
-                let leaked = Box::leak(query_str.clone().into_boxed_str());
-                cache.write().unwrap().insert(query_str, leaked);
-                leaked
-            }
-        };
-        let mut query = sqlx::query::<sqlx::Sqlite>(safe_query_str);
+        let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> =
+            sqlx::QueryBuilder::new("UPDATE `product_metadata` SET ");
+        let mut first = true;
         if let Some(val) = &patch.attributes {
-            query = query.bind(val);
+            if !first {
+                qb.push(", ");
+            }
+            qb.push("`attributes` = ");
+            qb.push_bind(val.clone());
+            first = false;
         }
         if let Some(val) = &patch.category {
-            query = query.bind(val);
+            if !first {
+                qb.push(", ");
+            }
+            qb.push("`category` = ");
+            qb.push_bind(val.clone());
+            first = false;
         }
         if let Some(val) = &patch.raw_data {
-            query = query.bind(val);
+            if !first {
+                qb.push(", ");
+            }
+            qb.push("`raw_data` = ");
+            qb.push_bind(val.clone());
+            first = false;
         }
-        query = query.bind(id);
-        let result = query.execute(executor).await?;
+        if first {
+            return Ok(0);
+        }
+        qb.push(" WHERE `id` = ");
+        qb.push_bind(id);
+        let result = qb.build().execute(executor).await?;
         Ok(result.rows_affected())
     }
 }
