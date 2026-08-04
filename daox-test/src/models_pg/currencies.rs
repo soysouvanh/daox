@@ -39,6 +39,16 @@ impl Currencies {
                 errors.push("code: exceeds max_length 3".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.code) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("code: format constraint not met".into());
+            }
+        }
         if let Some(v) = Some(&self.name) {
             if v.len() < 1 {
                 errors.push("name: min_length 1 not met".into());
@@ -47,6 +57,16 @@ impl Currencies {
         if let Some(v) = Some(&self.name) {
             if v.len() > 50 {
                 errors.push("name: exceeds max_length 50".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.name) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("name: format constraint not met".into());
             }
         }
         if errors.is_empty() {
@@ -66,7 +86,7 @@ impl Currencies {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT COUNT(*) FROM currencies"#;
+        let query = r#"SELECT COUNT(*) FROM "currencies""#;
         let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
         Ok(count as u64)
     }
@@ -88,7 +108,8 @@ impl Currencies {
         executor: E,
         limit: i64,
     ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let query = r#"SELECT "code", "name" FROM currencies ORDER BY "code" ASC LIMIT $1"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT "code", "name" FROM "currencies" ORDER BY "code" ASC LIMIT $1"#;
         sqlx::query_as::<_, Self>(query).bind(limit).fetch(executor)
     }
 
@@ -96,7 +117,7 @@ impl Currencies {
         executor: E,
         code: &str,
     ) -> sqlx::Result<Option<Self>> {
-        let query = r#"SELECT "code", "name" FROM currencies WHERE "code" = $1"#;
+        let query = r#"SELECT "code", "name" FROM "currencies" WHERE "code" = $1"#;
         sqlx::query_as::<_, Self>(query)
             .bind(code)
             .fetch_optional(executor)
@@ -107,7 +128,7 @@ impl Currencies {
         executor: E,
         code: &str,
     ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM currencies WHERE "code" = $1 LIMIT 1"#;
+        let query = r#"SELECT 1 FROM "currencies" WHERE "code" = $1 LIMIT 1"#;
         let exists: Option<(i32,)> = sqlx::query_as(query)
             .bind(code)
             .fetch_optional(executor)
@@ -120,7 +141,8 @@ impl Currencies {
         last_id: &str,
         limit: u32,
     ) -> sqlx::Result<Vec<Self>> {
-        let query = r#"SELECT "code", "name" FROM currencies WHERE "code" > $1 ORDER BY "code" ASC LIMIT $2"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT "code", "name" FROM "currencies" WHERE "code" > $1 ORDER BY "code" ASC LIMIT $2"#;
         sqlx::query_as::<_, Self>(query)
             .bind(last_id)
             .bind(limit as i64)
@@ -132,7 +154,7 @@ impl Currencies {
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"INSERT INTO currencies ("code", "name") VALUES ($1, $2)"#;
+        let query = r#"INSERT INTO "currencies" ("code", "name") VALUES ($1, $2)"#;
         let result = sqlx::query::<sqlx::Postgres>(query)
             .bind(&self.code)
             .bind(&self.name)
@@ -151,10 +173,20 @@ impl Currencies {
             return Ok(0);
         }
         let mut copy_in = executor
-            .copy_in_raw(r#"COPY currencies ("code", "name") FROM STDIN WITH (FORMAT csv)"#)
+            .copy_in_raw(r#"COPY "currencies" ("code", "name") FROM STDIN WITH (FORMAT csv)"#)
             .await?;
-        for chunk in items.chunks(10000) {
-            let mut payload = String::with_capacity(chunk.len() * 512);
+        for chunk in items.chunks(1000) {
+            let est: usize = chunk
+                .iter()
+                .map(|item| {
+                    let mut s = 0usize;
+                    let _ = item;
+                    s += item.code.len() + 2;
+                    s += item.name.len() + 2;
+                    s
+                })
+                .sum();
+            let mut payload = String::with_capacity(est);
             #[allow(unused_imports)]
             use std::fmt::Write;
             for item in chunk {
@@ -199,7 +231,7 @@ impl Currencies {
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"INSERT INTO currencies ("code", "name") VALUES ($1, $2) ON CONFLICT (\"code\") DO UPDATE SET \"name\" = EXCLUDED.\"name\""#;
+        let query = r#"INSERT INTO "currencies" ("code", "name") VALUES ($1, $2) ON CONFLICT ("code") DO UPDATE SET "name" = EXCLUDED."name""#;
         let result = sqlx::query::<sqlx::Postgres>(query)
             .bind(&self.code)
             .bind(&self.name)
@@ -221,12 +253,12 @@ impl Currencies {
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
             let mut qb: sqlx::QueryBuilder<sqlx::Postgres> =
-                sqlx::QueryBuilder::new(r#"INSERT INTO currencies ("code", "name") "#);
+                sqlx::QueryBuilder::new(r#"INSERT INTO "currencies" ("code", "name") "#);
             qb.push_values(chunk, |mut b, item| {
                 b.push_bind(&item.code);
                 b.push_bind(&item.name);
             });
-            qb.push(" ON CONFLICT (\"code\") DO UPDATE SET \"name\" = EXCLUDED.\"name\"");
+            qb.push(r#" ON CONFLICT ("code") DO UPDATE SET "name" = EXCLUDED."name""#);
             let result = qb.build().execute(&mut **executor).await?;
             total_affected += result.rows_affected();
         }
@@ -237,7 +269,7 @@ impl Currencies {
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query_str = r#"UPDATE currencies SET "name" = $1 WHERE "code" = $2"#;
+        let query_str = r#"UPDATE "currencies" SET "name" = $1 WHERE "code" = $2"#;
         let mut query = sqlx::query::<sqlx::Postgres>(query_str);
         query = query.bind(&self.name);
         query = query.bind(&self.code);
@@ -247,9 +279,9 @@ impl Currencies {
 
     pub async fn delete_by_code<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
         executor: E,
-        code: &String,
+        code: &str,
     ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM currencies WHERE "code" = $1"#;
+        let query = r#"DELETE FROM "currencies" WHERE "code" = $1"#;
         let result = sqlx::query::<sqlx::Postgres>(query)
             .bind(code)
             .execute(executor)
@@ -259,16 +291,16 @@ impl Currencies {
 
     pub async fn delete_many_by_code<'e>(
         executor: &mut sqlx::Transaction<'e, sqlx::Postgres>,
-        ids: &[String],
+        ids: &[&str],
     ) -> sqlx::Result<u64> {
         if ids.is_empty() {
             return Ok(0);
         }
         let mut total_affected = 0;
-        let chunk_size = 500_usize.min(65535);
+        let chunk_size = 5000_usize.min(65535);
         for chunk in ids.chunks(chunk_size) {
             let mut qb: sqlx::QueryBuilder<sqlx::Postgres> =
-                sqlx::QueryBuilder::new(r#"DELETE FROM currencies WHERE "code" IN "#);
+                sqlx::QueryBuilder::new(r#"DELETE FROM "currencies" WHERE "code" IN "#);
             qb.push("(");
             let mut sep = qb.separated(", ");
             for id in chunk {
@@ -287,68 +319,22 @@ impl Currencies {
         code: &str,
         patch: &CurrenciesPatch,
     ) -> sqlx::Result<u64> {
-        let mut bits = [0u8; 1];
+        let mut mask = 0u64;
         let mut has = false;
         if patch.name.is_some() {
-            bits[0] |= 1 << 0;
+            mask |= 1 << 0;
             has = true;
         }
         if !has {
             return Ok(0);
         }
 
-        static CACHE: std::sync::OnceLock<
-            [std::sync::RwLock<std::collections::HashMap<[u8; 1], String>>; 16],
-        > = std::sync::OnceLock::new();
-        let cache_shards = CACHE.get_or_init(|| {
-            std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()))
-        });
-        let shard_idx = bits
-            .iter()
-            .fold(0usize, |acc, &b| acc.wrapping_add(b as usize) ^ (acc << 3))
-            % 16;
-        let cache_lock = &cache_shards[shard_idx];
-        let query_str = {
-            let read = cache_lock.read().unwrap();
-            if let Some(q) = read.get(&bits) {
-                q.clone()
-            } else {
-                drop(read);
-                let mut write = cache_lock.write().unwrap();
-                if let Some(q) = write.get(&bits) {
-                    q.clone()
-                } else {
-                    let mut q = String::with_capacity(288);
-                    q.push_str("UPDATE currencies SET ");
-                    let mut first = true;
-                    let mut param_idx = 1;
-                    if patch.name.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#""name" = "#);
-                        {
-                            use std::fmt::Write;
-                            write!(&mut q, "${}", param_idx).unwrap();
-                            param_idx += 1;
-                        }
-                        first = false;
-                    }
-                    q.push_str(r#" WHERE "code" = "#);
-                    {
-                        use std::fmt::Write;
-                        write!(&mut q, "${}", param_idx).unwrap();
-                        param_idx += 1;
-                    }
-                    if write.len() < 1000 {
-                        write.insert(bits, q.clone());
-                    }
-                    q
-                }
-            }
+        let query_str = match mask {
+            1 => r#"UPDATE "currencies" SET "name" = $1 WHERE "code" = $2"#,
+            _ => unreachable!(),
         };
 
-        let mut query = sqlx::query::<sqlx::Postgres>(sqlx::AssertSqlSafe(query_str.as_str()));
+        let mut query = sqlx::query::<sqlx::Postgres>(query_str);
         if let Some(val) = &patch.name {
             query = query.bind(val);
         }

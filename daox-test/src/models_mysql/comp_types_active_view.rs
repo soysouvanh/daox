@@ -54,6 +54,16 @@ impl CompTypesActiveView {
                 errors.push("f_varchar: exceeds max_length 255".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.f_varchar.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("f_varchar: format constraint not met".into());
+            }
+        }
         if let Some(v) = Some(&self.id) {
             if (*v as i64) < 0 {
                 errors.push("id: minimum value '0' not met".into());
@@ -81,7 +91,7 @@ impl CompTypesActiveView {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT COUNT(*) FROM comp_types_active_view"#;
+        let query = r#"SELECT COUNT(*) FROM `comp_types_active_view`"#;
         let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
         Ok(count as u64)
     }
@@ -103,36 +113,8 @@ impl CompTypesActiveView {
         executor: E,
         limit: i64,
     ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let query = r#"SELECT `f_date`, `f_int`, `f_varchar`, `id` FROM comp_types_active_view ORDER BY `id` ASC LIMIT ?"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT `f_date`, `f_int`, `f_varchar`, `id` FROM `comp_types_active_view` ORDER BY `id` ASC LIMIT ?"#;
         sqlx::query_as::<_, Self>(query).bind(limit).fetch(executor)
-    }
-
-    #[deprecated(note = "Use list_by_cursor for large datasets")]
-    pub async fn list_paginated<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
-        executor: E,
-        order_by: &[CompTypesActiveViewOrderBy],
-        page: u32,
-        page_size: u32,
-    ) -> sqlx::Result<Vec<Self>> {
-        if order_by.is_empty() {
-            return Err(sqlx::Error::Protocol("ORDER BY cannot be empty".into()));
-        }
-        let page_size = page_size.clamp(1, 10000);
-        let offset = page.saturating_sub(1) * page_size;
-        let mut qb: sqlx::QueryBuilder<sqlx::MySql> = sqlx::QueryBuilder::new(
-            r#"SELECT `f_date`, `f_int`, `f_varchar`, `id` FROM comp_types_active_view"#,
-        );
-        qb.push(" ORDER BY ");
-        for (i, o) in order_by.iter().enumerate() {
-            if i > 0 {
-                qb.push(", ");
-            }
-            qb.push(o.as_str());
-        }
-        qb.push(" LIMIT ");
-        qb.push_bind(page_size as i64);
-        qb.push(" OFFSET ");
-        qb.push_bind(offset as i64);
-        qb.build_query_as::<Self>().fetch_all(executor).await
     }
 }

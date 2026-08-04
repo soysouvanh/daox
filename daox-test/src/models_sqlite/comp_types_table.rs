@@ -69,6 +69,26 @@ impl CompTypesTable {
                 errors.push("f_int: maximum value '2147483647' exceeded".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.f_text.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("f_text: format constraint not met".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.f_varchar.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("f_varchar: format constraint not met".into());
+            }
+        }
         if let Some(v) = Some(&self.id) {
             if (*v as i64) < 0 {
                 errors.push("id: minimum value '0' not met".into());
@@ -96,7 +116,7 @@ impl CompTypesTable {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT COUNT(*) FROM comp_types_table"#;
+        let query = r#"SELECT COUNT(*) FROM `comp_types_table`"#;
         let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
         Ok(count as u64)
     }
@@ -106,7 +126,7 @@ impl CompTypesTable {
     pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT MAX(rowid) FROM comp_types_table"#;
+        let query = r#"SELECT MAX(rowid) FROM `comp_types_table`"#;
         let count: Option<(Option<i64>,)> = sqlx::query_as(query).fetch_optional(executor).await?;
         Ok(count
             .and_then(|(c,)| c)
@@ -121,7 +141,8 @@ impl CompTypesTable {
         executor: E,
         limit: i64,
     ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let query = r#"SELECT `f_bool`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_text`, `f_varchar`, `id` FROM comp_types_table ORDER BY `id` ASC LIMIT ?"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT `f_bool`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_text`, `f_varchar`, `id` FROM `comp_types_table` ORDER BY `id` ASC LIMIT ?"#;
         sqlx::query_as::<_, Self>(query).bind(limit).fetch(executor)
     }
 
@@ -129,7 +150,7 @@ impl CompTypesTable {
         executor: E,
         id: i32,
     ) -> sqlx::Result<Option<Self>> {
-        let query = r#"SELECT `f_bool`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_text`, `f_varchar`, `id` FROM comp_types_table WHERE `id` = ?"#;
+        let query = r#"SELECT `f_bool`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_text`, `f_varchar`, `id` FROM `comp_types_table` WHERE `id` = ?"#;
         sqlx::query_as::<_, Self>(query)
             .bind(id)
             .fetch_optional(executor)
@@ -140,7 +161,7 @@ impl CompTypesTable {
         executor: E,
         id: i32,
     ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM comp_types_table WHERE `id` = ? LIMIT 1"#;
+        let query = r#"SELECT 1 FROM `comp_types_table` WHERE `id` = ? LIMIT 1"#;
         let exists: Option<(i32,)> = sqlx::query_as(query)
             .bind(id)
             .fetch_optional(executor)
@@ -153,7 +174,8 @@ impl CompTypesTable {
         last_id: i32,
         limit: u32,
     ) -> sqlx::Result<Vec<Self>> {
-        let query = r#"SELECT `f_bool`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_text`, `f_varchar`, `id` FROM comp_types_table WHERE `id` > ? ORDER BY `id` ASC LIMIT ?"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT `f_bool`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_text`, `f_varchar`, `id` FROM `comp_types_table` WHERE `id` > ? ORDER BY `id` ASC LIMIT ?"#;
         sqlx::query_as::<_, Self>(query)
             .bind(last_id)
             .bind(limit as i64)
@@ -165,7 +187,7 @@ impl CompTypesTable {
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"INSERT INTO comp_types_table (`f_bool`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_text`, `f_varchar`) VALUES (?, ?, ?, ?, ?, ?, ?)"#;
+        let query = r#"INSERT INTO `comp_types_table` (`f_bool`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_text`, `f_varchar`) VALUES (?, ?, ?, ?, ?, ?, ?)"#;
         let result = sqlx::query::<sqlx::Sqlite>(query)
             .bind(&self.f_bool)
             .bind(&self.f_decimal)
@@ -192,7 +214,7 @@ impl CompTypesTable {
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
             let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
-                r#"INSERT INTO comp_types_table (`f_bool`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_text`, `f_varchar`) "#,
+                r#"INSERT INTO `comp_types_table` (`f_bool`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_text`, `f_varchar`) "#,
             );
             qb.push_values(chunk, |mut b, item| {
                 b.push_bind(&item.f_bool);
@@ -213,7 +235,7 @@ impl CompTypesTable {
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"INSERT INTO comp_types_table (`f_bool`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_text`, `f_varchar`) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (`id`) DO UPDATE SET `f_bool` = EXCLUDED.`f_bool`, `f_decimal` = EXCLUDED.`f_decimal`, `f_double` = EXCLUDED.`f_double`, `f_float` = EXCLUDED.`f_float`, `f_int` = EXCLUDED.`f_int`, `f_text` = EXCLUDED.`f_text`, `f_varchar` = EXCLUDED.`f_varchar`"#;
+        let query = r#"INSERT INTO `comp_types_table` (`f_bool`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_text`, `f_varchar`) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (`id`) DO UPDATE SET `f_bool` = EXCLUDED.`f_bool`, `f_decimal` = EXCLUDED.`f_decimal`, `f_double` = EXCLUDED.`f_double`, `f_float` = EXCLUDED.`f_float`, `f_int` = EXCLUDED.`f_int`, `f_text` = EXCLUDED.`f_text`, `f_varchar` = EXCLUDED.`f_varchar`"#;
         let result = sqlx::query::<sqlx::Sqlite>(query)
             .bind(&self.f_bool)
             .bind(&self.f_decimal)
@@ -240,7 +262,7 @@ impl CompTypesTable {
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
             let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
-                r#"INSERT INTO comp_types_table (`f_bool`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_text`, `f_varchar`) "#,
+                r#"INSERT INTO `comp_types_table` (`f_bool`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_text`, `f_varchar`) "#,
             );
             qb.push_values(chunk, |mut b, item| {
                 b.push_bind(&item.f_bool);
@@ -251,7 +273,7 @@ impl CompTypesTable {
                 b.push_bind(&item.f_text);
                 b.push_bind(&item.f_varchar);
             });
-            qb.push(" ON CONFLICT (`id`) DO UPDATE SET `f_bool` = EXCLUDED.`f_bool`, `f_decimal` = EXCLUDED.`f_decimal`, `f_double` = EXCLUDED.`f_double`, `f_float` = EXCLUDED.`f_float`, `f_int` = EXCLUDED.`f_int`, `f_text` = EXCLUDED.`f_text`, `f_varchar` = EXCLUDED.`f_varchar`");
+            qb.push(r#" ON CONFLICT (`id`) DO UPDATE SET `f_bool` = EXCLUDED.`f_bool`, `f_decimal` = EXCLUDED.`f_decimal`, `f_double` = EXCLUDED.`f_double`, `f_float` = EXCLUDED.`f_float`, `f_int` = EXCLUDED.`f_int`, `f_text` = EXCLUDED.`f_text`, `f_varchar` = EXCLUDED.`f_varchar`"#);
             let result = qb.build().execute(&mut **executor).await?;
             total_affected += result.rows_affected();
         }
@@ -262,7 +284,7 @@ impl CompTypesTable {
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query_str = r#"UPDATE comp_types_table SET `f_bool` = ?, `f_decimal` = ?, `f_double` = ?, `f_float` = ?, `f_int` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#;
+        let query_str = r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_double` = ?, `f_float` = ?, `f_int` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#;
         let mut query = sqlx::query::<sqlx::Sqlite>(query_str);
         query = query.bind(&self.f_bool);
         query = query.bind(&self.f_decimal);
@@ -280,7 +302,7 @@ impl CompTypesTable {
         executor: E,
         id: i32,
     ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM comp_types_table WHERE `id` = ?"#;
+        let query = r#"DELETE FROM `comp_types_table` WHERE `id` = ?"#;
         let result = sqlx::query::<sqlx::Sqlite>(query)
             .bind(id)
             .execute(executor)
@@ -299,7 +321,7 @@ impl CompTypesTable {
         let chunk_size = 5000_usize.min(32766);
         for chunk in ids.chunks(chunk_size) {
             let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> =
-                sqlx::QueryBuilder::new(r#"DELETE FROM comp_types_table WHERE `id` IN "#);
+                sqlx::QueryBuilder::new(r#"DELETE FROM `comp_types_table` WHERE `id` IN "#);
             qb.push("(");
             let mut sep = qb.separated(", ");
             for id in chunk {
@@ -318,131 +340,372 @@ impl CompTypesTable {
         id: i32,
         patch: &CompTypesTablePatch,
     ) -> sqlx::Result<u64> {
-        let mut bits = [0u8; 1];
+        let mut mask = 0u64;
         let mut has = false;
         if patch.f_bool.is_some() {
-            bits[0] |= 1 << 0;
+            mask |= 1 << 0;
             has = true;
         }
         if patch.f_decimal.is_some() {
-            bits[0] |= 1 << 1;
+            mask |= 1 << 1;
             has = true;
         }
         if patch.f_double.is_some() {
-            bits[0] |= 1 << 2;
+            mask |= 1 << 2;
             has = true;
         }
         if patch.f_float.is_some() {
-            bits[0] |= 1 << 3;
+            mask |= 1 << 3;
             has = true;
         }
         if patch.f_int.is_some() {
-            bits[0] |= 1 << 4;
+            mask |= 1 << 4;
             has = true;
         }
         if patch.f_text.is_some() {
-            bits[0] |= 1 << 5;
+            mask |= 1 << 5;
             has = true;
         }
         if patch.f_varchar.is_some() {
-            bits[0] |= 1 << 6;
+            mask |= 1 << 6;
             has = true;
         }
         if !has {
             return Ok(0);
         }
 
-        static CACHE: std::sync::OnceLock<
-            [std::sync::RwLock<std::collections::HashMap<[u8; 1], String>>; 16],
-        > = std::sync::OnceLock::new();
-        let cache_shards = CACHE.get_or_init(|| {
-            std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()))
-        });
-        let shard_idx = bits
-            .iter()
-            .fold(0usize, |acc, &b| acc.wrapping_add(b as usize) ^ (acc << 3))
-            % 16;
-        let cache_lock = &cache_shards[shard_idx];
-        let query_str = {
-            let read = cache_lock.read().unwrap();
-            if let Some(q) = read.get(&bits) {
-                q.clone()
-            } else {
-                drop(read);
-                let mut write = cache_lock.write().unwrap();
-                if let Some(q) = write.get(&bits) {
-                    q.clone()
-                } else {
-                    let mut q = String::with_capacity(480);
-                    q.push_str("UPDATE comp_types_table SET ");
-                    let mut first = true;
-                    if patch.f_bool.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`f_bool` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    if patch.f_decimal.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`f_decimal` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    if patch.f_double.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`f_double` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    if patch.f_float.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`f_float` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    if patch.f_int.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`f_int` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    if patch.f_text.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`f_text` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    if patch.f_varchar.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`f_varchar` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    q.push_str(r#" WHERE `id` = "#);
-                    q.push_str("?");
-                    if write.len() < 1000 {
-                        write.insert(bits, q.clone());
-                    }
-                    q
-                }
+        let query_str = match mask {
+            1 => r#"UPDATE `comp_types_table` SET `f_bool` = ? WHERE `id` = ?"#,
+            2 => r#"UPDATE `comp_types_table` SET `f_decimal` = ? WHERE `id` = ?"#,
+            3 => r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ? WHERE `id` = ?"#,
+            4 => r#"UPDATE `comp_types_table` SET `f_double` = ? WHERE `id` = ?"#,
+            5 => r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_double` = ? WHERE `id` = ?"#,
+            6 => r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_double` = ? WHERE `id` = ?"#,
+            7 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_double` = ? WHERE `id` = ?"#
             }
+            8 => r#"UPDATE `comp_types_table` SET `f_float` = ? WHERE `id` = ?"#,
+            9 => r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_float` = ? WHERE `id` = ?"#,
+            10 => r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_float` = ? WHERE `id` = ?"#,
+            11 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_float` = ? WHERE `id` = ?"#
+            }
+            12 => r#"UPDATE `comp_types_table` SET `f_double` = ?, `f_float` = ? WHERE `id` = ?"#,
+            13 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_double` = ?, `f_float` = ? WHERE `id` = ?"#
+            }
+            14 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_double` = ?, `f_float` = ? WHERE `id` = ?"#
+            }
+            15 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_double` = ?, `f_float` = ? WHERE `id` = ?"#
+            }
+            16 => r#"UPDATE `comp_types_table` SET `f_int` = ? WHERE `id` = ?"#,
+            17 => r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_int` = ? WHERE `id` = ?"#,
+            18 => r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_int` = ? WHERE `id` = ?"#,
+            19 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_int` = ? WHERE `id` = ?"#
+            }
+            20 => r#"UPDATE `comp_types_table` SET `f_double` = ?, `f_int` = ? WHERE `id` = ?"#,
+            21 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_double` = ?, `f_int` = ? WHERE `id` = ?"#
+            }
+            22 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_double` = ?, `f_int` = ? WHERE `id` = ?"#
+            }
+            23 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_double` = ?, `f_int` = ? WHERE `id` = ?"#
+            }
+            24 => r#"UPDATE `comp_types_table` SET `f_float` = ?, `f_int` = ? WHERE `id` = ?"#,
+            25 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_float` = ?, `f_int` = ? WHERE `id` = ?"#
+            }
+            26 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_float` = ?, `f_int` = ? WHERE `id` = ?"#
+            }
+            27 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_float` = ?, `f_int` = ? WHERE `id` = ?"#
+            }
+            28 => {
+                r#"UPDATE `comp_types_table` SET `f_double` = ?, `f_float` = ?, `f_int` = ? WHERE `id` = ?"#
+            }
+            29 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_double` = ?, `f_float` = ?, `f_int` = ? WHERE `id` = ?"#
+            }
+            30 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_double` = ?, `f_float` = ?, `f_int` = ? WHERE `id` = ?"#
+            }
+            31 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_double` = ?, `f_float` = ?, `f_int` = ? WHERE `id` = ?"#
+            }
+            32 => r#"UPDATE `comp_types_table` SET `f_text` = ? WHERE `id` = ?"#,
+            33 => r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_text` = ? WHERE `id` = ?"#,
+            34 => r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_text` = ? WHERE `id` = ?"#,
+            35 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            36 => r#"UPDATE `comp_types_table` SET `f_double` = ?, `f_text` = ? WHERE `id` = ?"#,
+            37 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_double` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            38 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_double` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            39 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_double` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            40 => r#"UPDATE `comp_types_table` SET `f_float` = ?, `f_text` = ? WHERE `id` = ?"#,
+            41 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_float` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            42 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_float` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            43 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_float` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            44 => {
+                r#"UPDATE `comp_types_table` SET `f_double` = ?, `f_float` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            45 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_double` = ?, `f_float` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            46 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_double` = ?, `f_float` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            47 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_double` = ?, `f_float` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            48 => r#"UPDATE `comp_types_table` SET `f_int` = ?, `f_text` = ? WHERE `id` = ?"#,
+            49 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_int` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            50 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_int` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            51 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_int` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            52 => {
+                r#"UPDATE `comp_types_table` SET `f_double` = ?, `f_int` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            53 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_double` = ?, `f_int` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            54 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_double` = ?, `f_int` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            55 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_double` = ?, `f_int` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            56 => {
+                r#"UPDATE `comp_types_table` SET `f_float` = ?, `f_int` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            57 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_float` = ?, `f_int` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            58 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_float` = ?, `f_int` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            59 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_float` = ?, `f_int` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            60 => {
+                r#"UPDATE `comp_types_table` SET `f_double` = ?, `f_float` = ?, `f_int` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            61 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_double` = ?, `f_float` = ?, `f_int` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            62 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_double` = ?, `f_float` = ?, `f_int` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            63 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_double` = ?, `f_float` = ?, `f_int` = ?, `f_text` = ? WHERE `id` = ?"#
+            }
+            64 => r#"UPDATE `comp_types_table` SET `f_varchar` = ? WHERE `id` = ?"#,
+            65 => r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_varchar` = ? WHERE `id` = ?"#,
+            66 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            67 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            68 => r#"UPDATE `comp_types_table` SET `f_double` = ?, `f_varchar` = ? WHERE `id` = ?"#,
+            69 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_double` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            70 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_double` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            71 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_double` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            72 => r#"UPDATE `comp_types_table` SET `f_float` = ?, `f_varchar` = ? WHERE `id` = ?"#,
+            73 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_float` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            74 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_float` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            75 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_float` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            76 => {
+                r#"UPDATE `comp_types_table` SET `f_double` = ?, `f_float` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            77 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_double` = ?, `f_float` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            78 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_double` = ?, `f_float` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            79 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_double` = ?, `f_float` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            80 => r#"UPDATE `comp_types_table` SET `f_int` = ?, `f_varchar` = ? WHERE `id` = ?"#,
+            81 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_int` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            82 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_int` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            83 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_int` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            84 => {
+                r#"UPDATE `comp_types_table` SET `f_double` = ?, `f_int` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            85 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_double` = ?, `f_int` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            86 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_double` = ?, `f_int` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            87 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_double` = ?, `f_int` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            88 => {
+                r#"UPDATE `comp_types_table` SET `f_float` = ?, `f_int` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            89 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_float` = ?, `f_int` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            90 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_float` = ?, `f_int` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            91 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_float` = ?, `f_int` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            92 => {
+                r#"UPDATE `comp_types_table` SET `f_double` = ?, `f_float` = ?, `f_int` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            93 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_double` = ?, `f_float` = ?, `f_int` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            94 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_double` = ?, `f_float` = ?, `f_int` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            95 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_double` = ?, `f_float` = ?, `f_int` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            96 => r#"UPDATE `comp_types_table` SET `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#,
+            97 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            98 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            99 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            100 => {
+                r#"UPDATE `comp_types_table` SET `f_double` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            101 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_double` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            102 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_double` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            103 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_double` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            104 => {
+                r#"UPDATE `comp_types_table` SET `f_float` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            105 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_float` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            106 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_float` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            107 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_float` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            108 => {
+                r#"UPDATE `comp_types_table` SET `f_double` = ?, `f_float` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            109 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_double` = ?, `f_float` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            110 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_double` = ?, `f_float` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            111 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_double` = ?, `f_float` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            112 => {
+                r#"UPDATE `comp_types_table` SET `f_int` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            113 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_int` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            114 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_int` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            115 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_int` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            116 => {
+                r#"UPDATE `comp_types_table` SET `f_double` = ?, `f_int` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            117 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_double` = ?, `f_int` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            118 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_double` = ?, `f_int` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            119 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_double` = ?, `f_int` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            120 => {
+                r#"UPDATE `comp_types_table` SET `f_float` = ?, `f_int` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            121 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_float` = ?, `f_int` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            122 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_float` = ?, `f_int` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            123 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_float` = ?, `f_int` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            124 => {
+                r#"UPDATE `comp_types_table` SET `f_double` = ?, `f_float` = ?, `f_int` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            125 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_double` = ?, `f_float` = ?, `f_int` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            126 => {
+                r#"UPDATE `comp_types_table` SET `f_decimal` = ?, `f_double` = ?, `f_float` = ?, `f_int` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            127 => {
+                r#"UPDATE `comp_types_table` SET `f_bool` = ?, `f_decimal` = ?, `f_double` = ?, `f_float` = ?, `f_int` = ?, `f_text` = ?, `f_varchar` = ? WHERE `id` = ?"#
+            }
+            _ => unreachable!(),
         };
 
-        let mut query = sqlx::query::<sqlx::Sqlite>(sqlx::AssertSqlSafe(query_str.as_str()));
+        let mut query = sqlx::query::<sqlx::Sqlite>(query_str);
         if let Some(val) = &patch.f_bool {
             query = query.bind(val);
         }

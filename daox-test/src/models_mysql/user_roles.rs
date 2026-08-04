@@ -44,6 +44,16 @@ impl UserRoles {
                 errors.push("role_name: exceeds max_length 50".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.role_name) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("role_name: format constraint not met".into());
+            }
+        }
         if let Some(v) = Some(&self.user_id) {
             if (*v as i64) < 0 {
                 errors.push("user_id: minimum value '0' not met".into());
@@ -71,7 +81,7 @@ impl UserRoles {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT COUNT(*) FROM user_roles"#;
+        let query = r#"SELECT COUNT(*) FROM `user_roles`"#;
         let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
         Ok(count as u64)
     }
@@ -93,37 +103,9 @@ impl UserRoles {
         executor: E,
         limit: i64,
     ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let query = r#"SELECT `assigned_at`, `role_name`, `user_id` FROM user_roles ORDER BY `role_name` ASC LIMIT ?"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT `assigned_at`, `role_name`, `user_id` FROM `user_roles` ORDER BY `role_name` ASC, `user_id` ASC LIMIT ?"#;
         sqlx::query_as::<_, Self>(query).bind(limit).fetch(executor)
-    }
-
-    #[deprecated(note = "Use list_by_cursor for large datasets")]
-    pub async fn list_paginated<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
-        executor: E,
-        order_by: &[UserRolesOrderBy],
-        page: u32,
-        page_size: u32,
-    ) -> sqlx::Result<Vec<Self>> {
-        if order_by.is_empty() {
-            return Err(sqlx::Error::Protocol("ORDER BY cannot be empty".into()));
-        }
-        let page_size = page_size.clamp(1, 10000);
-        let offset = page.saturating_sub(1) * page_size;
-        let mut qb: sqlx::QueryBuilder<sqlx::MySql> = sqlx::QueryBuilder::new(
-            r#"SELECT `assigned_at`, `role_name`, `user_id` FROM user_roles"#,
-        );
-        qb.push(" ORDER BY ");
-        for (i, o) in order_by.iter().enumerate() {
-            if i > 0 {
-                qb.push(", ");
-            }
-            qb.push(o.as_str());
-        }
-        qb.push(" LIMIT ");
-        qb.push_bind(page_size as i64);
-        qb.push(" OFFSET ");
-        qb.push_bind(offset as i64);
-        qb.build_query_as::<Self>().fetch_all(executor).await
     }
 
     pub async fn get_by_role_name_and_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
@@ -131,7 +113,7 @@ impl UserRoles {
         role_name: &str,
         user_id: i64,
     ) -> sqlx::Result<Option<Self>> {
-        let query = r#"SELECT `assigned_at`, `role_name`, `user_id` FROM user_roles WHERE `role_name` = ? AND `user_id` = ?"#;
+        let query = r#"SELECT `assigned_at`, `role_name`, `user_id` FROM `user_roles` WHERE `role_name` = ? AND `user_id` = ?"#;
         sqlx::query_as::<_, Self>(query)
             .bind(role_name)
             .bind(user_id)
@@ -147,7 +129,7 @@ impl UserRoles {
         role_name: &str,
         user_id: i64,
     ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM user_roles WHERE `role_name` = ? AND `user_id` = ? LIMIT 1"#;
+        let query = r#"SELECT 1 FROM `user_roles` WHERE `role_name` = ? AND `user_id` = ? LIMIT 1"#;
         let exists: Option<(i32,)> = sqlx::query_as(query)
             .bind(role_name)
             .bind(user_id)
@@ -161,7 +143,7 @@ impl UserRoles {
         executor: E,
     ) -> sqlx::Result<u64> {
         let query =
-            r#"INSERT INTO user_roles (`assigned_at`, `role_name`, `user_id`) VALUES (?, ?, ?)"#;
+            r#"INSERT INTO `user_roles` (`assigned_at`, `role_name`, `user_id`) VALUES (?, ?, ?)"#;
         let result = sqlx::query::<sqlx::MySql>(query)
             .bind(&self.assigned_at)
             .bind(&self.role_name)
@@ -184,7 +166,7 @@ impl UserRoles {
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
             let mut qb: sqlx::QueryBuilder<sqlx::MySql> = sqlx::QueryBuilder::new(
-                r#"INSERT INTO user_roles (`assigned_at`, `role_name`, `user_id`) "#,
+                r#"INSERT INTO `user_roles` (`assigned_at`, `role_name`, `user_id`) "#,
             );
             qb.push_values(chunk, |mut b, item| {
                 b.push_bind(&item.assigned_at);
@@ -201,7 +183,7 @@ impl UserRoles {
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"INSERT INTO user_roles (`assigned_at`, `role_name`, `user_id`) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE `assigned_at` = VALUES(`assigned_at`)"#;
+        let query = r#"INSERT INTO `user_roles` (`assigned_at`, `role_name`, `user_id`) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE `assigned_at` = VALUES(`assigned_at`)"#;
         let result = sqlx::query::<sqlx::MySql>(query)
             .bind(&self.assigned_at)
             .bind(&self.role_name)
@@ -224,14 +206,14 @@ impl UserRoles {
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
             let mut qb: sqlx::QueryBuilder<sqlx::MySql> = sqlx::QueryBuilder::new(
-                r#"INSERT INTO user_roles (`assigned_at`, `role_name`, `user_id`) "#,
+                r#"INSERT INTO `user_roles` (`assigned_at`, `role_name`, `user_id`) "#,
             );
             qb.push_values(chunk, |mut b, item| {
                 b.push_bind(&item.assigned_at);
                 b.push_bind(&item.role_name);
                 b.push_bind(&item.user_id);
             });
-            qb.push(" ON DUPLICATE KEY UPDATE `assigned_at` = VALUES(`assigned_at`)");
+            qb.push(r#" ON DUPLICATE KEY UPDATE `assigned_at` = VALUES(`assigned_at`)"#);
             let result = qb.build().execute(&mut **executor).await?;
             total_affected += result.rows_affected();
         }
@@ -246,7 +228,7 @@ impl UserRoles {
         executor: E,
     ) -> sqlx::Result<u64> {
         let query_str =
-            r#"UPDATE user_roles SET `assigned_at` = ? WHERE `role_name` = ? AND `user_id` = ?"#;
+            r#"UPDATE `user_roles` SET `assigned_at` = ? WHERE `role_name` = ? AND `user_id` = ?"#;
         let mut query = sqlx::query::<sqlx::MySql>(query_str);
         query = query.bind(&self.assigned_at);
         query = query.bind(&self.role_name);
@@ -260,10 +242,10 @@ impl UserRoles {
         E: sqlx::Executor<'e, Database = sqlx::MySql>,
     >(
         executor: E,
-        role_name: &String,
+        role_name: &str,
         user_id: i64,
     ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM user_roles WHERE `role_name` = ? AND `user_id` = ?"#;
+        let query = r#"DELETE FROM `user_roles` WHERE `role_name` = ? AND `user_id` = ?"#;
         let result = sqlx::query::<sqlx::MySql>(query)
             .bind(role_name)
             .bind(user_id)
@@ -282,61 +264,24 @@ impl UserRoles {
         user_id: i64,
         patch: &UserRolesPatch,
     ) -> sqlx::Result<u64> {
-        let mut bits = [0u8; 1];
+        let mut mask = 0u64;
         let mut has = false;
         if patch.assigned_at.is_some() {
-            bits[0] |= 1 << 0;
+            mask |= 1 << 0;
             has = true;
         }
         if !has {
             return Ok(0);
         }
 
-        static CACHE: std::sync::OnceLock<
-            [std::sync::RwLock<std::collections::HashMap<[u8; 1], String>>; 16],
-        > = std::sync::OnceLock::new();
-        let cache_shards = CACHE.get_or_init(|| {
-            std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()))
-        });
-        let shard_idx = bits
-            .iter()
-            .fold(0usize, |acc, &b| acc.wrapping_add(b as usize) ^ (acc << 3))
-            % 16;
-        let cache_lock = &cache_shards[shard_idx];
-        let query_str = {
-            let read = cache_lock.read().unwrap();
-            if let Some(q) = read.get(&bits) {
-                q.clone()
-            } else {
-                drop(read);
-                let mut write = cache_lock.write().unwrap();
-                if let Some(q) = write.get(&bits) {
-                    q.clone()
-                } else {
-                    let mut q = String::with_capacity(288);
-                    q.push_str("UPDATE user_roles SET ");
-                    let mut first = true;
-                    if patch.assigned_at.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`assigned_at` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    q.push_str(r#" WHERE `role_name` = "#);
-                    q.push_str("?");
-                    q.push_str(r#" AND `user_id` = "#);
-                    q.push_str("?");
-                    if write.len() < 1000 {
-                        write.insert(bits, q.clone());
-                    }
-                    q
-                }
+        let query_str = match mask {
+            1 => {
+                r#"UPDATE `user_roles` SET `assigned_at` = ? WHERE `role_name` = ? AND `user_id` = ?"#
             }
+            _ => unreachable!(),
         };
 
-        let mut query = sqlx::query::<sqlx::MySql>(sqlx::AssertSqlSafe(query_str.as_str()));
+        let mut query = sqlx::query::<sqlx::MySql>(query_str);
         if let Some(val) = &patch.assigned_at {
             query = query.bind(val);
         }
@@ -346,59 +291,13 @@ impl UserRoles {
         Ok(result.rows_affected())
     }
 
-    pub async fn get_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
-        executor: E,
-        user_id: i64,
-        role_name: &String,
-    ) -> sqlx::Result<Option<Self>> {
-        let query = r#"SELECT `assigned_at`, `role_name`, `user_id` FROM user_roles WHERE `user_id` = ? AND `role_name` = ?"#;
-        sqlx::query_as::<_, Self>(query)
-            .bind(user_id)
-            .bind(role_name)
-            .fetch_optional(executor)
-            .await
-    }
-
-    pub async fn exists_by_user_id_and_role_name<
-        'e,
-        E: sqlx::Executor<'e, Database = sqlx::MySql>,
-    >(
-        executor: E,
-        user_id: i64,
-        role_name: &String,
-    ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM user_roles WHERE `user_id` = ? AND `role_name` = ? LIMIT 1"#;
-        let exists: Option<(i32,)> = sqlx::query_as(query)
-            .bind(user_id)
-            .bind(role_name)
-            .fetch_optional(executor)
-            .await?;
-        Ok(exists.is_some())
-    }
-
-    pub async fn delete_by_user_id_and_role_name<
-        'e,
-        E: sqlx::Executor<'e, Database = sqlx::MySql>,
-    >(
-        executor: E,
-        user_id: i64,
-        role_name: &String,
-    ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM user_roles WHERE `user_id` = ? AND `role_name` = ?"#;
-        let result = sqlx::query::<sqlx::MySql>(query)
-            .bind(user_id)
-            .bind(role_name)
-            .execute(executor)
-            .await?;
-        Ok(result.rows_affected())
-    }
-
     pub async fn list_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         executor: E,
         user_id: i64,
         limit: i64,
     ) -> sqlx::Result<Vec<Self>> {
-        let query = r#"SELECT `assigned_at`, `role_name`, `user_id` FROM user_roles WHERE `user_id` = ? ORDER BY `role_name` ASC LIMIT ?"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT `assigned_at`, `role_name`, `user_id` FROM `user_roles` WHERE `user_id` = ? ORDER BY `role_name` ASC, `user_id` ASC LIMIT ?"#;
         sqlx::query_as::<_, Self>(query)
             .bind(user_id)
             .bind(limit)
@@ -414,7 +313,8 @@ impl UserRoles {
         user_id: i64,
         limit: i64,
     ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let query = r#"SELECT `assigned_at`, `role_name`, `user_id` FROM user_roles WHERE `user_id` = ? ORDER BY `role_name` ASC LIMIT ?"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT `assigned_at`, `role_name`, `user_id` FROM `user_roles` WHERE `user_id` = ? ORDER BY `role_name` ASC, `user_id` ASC LIMIT ?"#;
         sqlx::query_as::<_, Self>(query)
             .bind(user_id)
             .bind(limit)
@@ -425,7 +325,7 @@ impl UserRoles {
         executor: E,
         user_id: i64,
     ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM user_roles WHERE `user_id` = ? LIMIT 1"#;
+        let query = r#"SELECT 1 FROM `user_roles` WHERE `user_id` = ? LIMIT 1"#;
         let exists: Option<(i32,)> = sqlx::query_as(query)
             .bind(user_id)
             .fetch_optional(executor)
@@ -437,9 +337,56 @@ impl UserRoles {
         executor: E,
         user_id: i64,
     ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM user_roles WHERE `user_id` = ?"#;
+        let query = r#"DELETE FROM `user_roles` WHERE `user_id` = ?"#;
         let result = sqlx::query::<sqlx::MySql>(query)
             .bind(user_id)
+            .execute(executor)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn get_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
+        executor: E,
+        user_id: i64,
+        role_name: &str,
+    ) -> sqlx::Result<Option<Self>> {
+        let query = r#"SELECT `assigned_at`, `role_name`, `user_id` FROM `user_roles` WHERE `user_id` = ? AND `role_name` = ?"#;
+        sqlx::query_as::<_, Self>(query)
+            .bind(user_id)
+            .bind(role_name)
+            .fetch_optional(executor)
+            .await
+    }
+
+    pub async fn exists_by_user_id_and_role_name<
+        'e,
+        E: sqlx::Executor<'e, Database = sqlx::MySql>,
+    >(
+        executor: E,
+        user_id: i64,
+        role_name: &str,
+    ) -> sqlx::Result<bool> {
+        let query = r#"SELECT 1 FROM `user_roles` WHERE `user_id` = ? AND `role_name` = ? LIMIT 1"#;
+        let exists: Option<(i32,)> = sqlx::query_as(query)
+            .bind(user_id)
+            .bind(role_name)
+            .fetch_optional(executor)
+            .await?;
+        Ok(exists.is_some())
+    }
+
+    pub async fn delete_by_user_id_and_role_name<
+        'e,
+        E: sqlx::Executor<'e, Database = sqlx::MySql>,
+    >(
+        executor: E,
+        user_id: i64,
+        role_name: &str,
+    ) -> sqlx::Result<u64> {
+        let query = r#"DELETE FROM `user_roles` WHERE `user_id` = ? AND `role_name` = ?"#;
+        let result = sqlx::query::<sqlx::MySql>(query)
+            .bind(user_id)
+            .bind(role_name)
             .execute(executor)
             .await?;
         Ok(result.rows_affected())

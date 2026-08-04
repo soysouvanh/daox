@@ -44,6 +44,16 @@ impl UserRoles {
                 errors.push("role_name: exceeds max_length 50".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.role_name) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("role_name: format constraint not met".into());
+            }
+        }
         if let Some(v) = Some(&self.user_id) {
             if (*v as i64) < 0 {
                 errors.push("user_id: minimum value '0' not met".into());
@@ -71,7 +81,7 @@ impl UserRoles {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT COUNT(*) FROM user_roles"#;
+        let query = r#"SELECT COUNT(*) FROM "user_roles""#;
         let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
         Ok(count as u64)
     }
@@ -93,45 +103,16 @@ impl UserRoles {
         executor: E,
         limit: i64,
     ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let query = r#"SELECT "assigned_at", "role_name", "user_id" FROM user_roles ORDER BY "user_id" ASC LIMIT $1"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT "assigned_at", "role_name", "user_id" FROM "user_roles" ORDER BY "user_id" ASC LIMIT $1"#;
         sqlx::query_as::<_, Self>(query).bind(limit).fetch(executor)
-    }
-
-    #[deprecated(note = "Use list_by_cursor for large datasets")]
-    pub async fn list_paginated<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
-        executor: E,
-        order_by: &[UserRolesOrderBy],
-        page: u32,
-        page_size: u32,
-    ) -> sqlx::Result<Vec<Self>> {
-        if order_by.is_empty() {
-            return Err(sqlx::Error::Protocol("ORDER BY cannot be empty".into()));
-        }
-        let page_size = page_size.clamp(1, 10000);
-        let offset = page.saturating_sub(1) * page_size;
-        let mut qb: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new(
-            r#"SELECT "assigned_at", "role_name", "user_id" FROM user_roles"#,
-        );
-        qb.push(" ORDER BY ");
-        for (i, o) in order_by.iter().enumerate() {
-            if i > 0 {
-                qb.push(", ");
-            }
-            qb.push(o.as_str());
-        }
-        qb.push(" LIMIT ");
-        qb.push_bind(page_size as i64);
-        qb.push(" OFFSET ");
-        qb.push_bind(offset as i64);
-        qb.build_query_as::<Self>().fetch_all(executor).await
     }
 
     pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query =
-            r#"INSERT INTO user_roles ("assigned_at", "role_name", "user_id") VALUES ($1, $2, $3)"#;
+        let query = r#"INSERT INTO "user_roles" ("assigned_at", "role_name", "user_id") VALUES ($1, $2, $3)"#;
         let result = sqlx::query::<sqlx::Postgres>(query)
             .bind(&self.assigned_at)
             .bind(&self.role_name)
@@ -150,9 +131,20 @@ impl UserRoles {
         if items.is_empty() {
             return Ok(0);
         }
-        let mut copy_in = executor.copy_in_raw(r#"COPY user_roles ("assigned_at", "role_name", "user_id") FROM STDIN WITH (FORMAT csv)"#).await?;
-        for chunk in items.chunks(10000) {
-            let mut payload = String::with_capacity(chunk.len() * 512);
+        let mut copy_in = executor.copy_in_raw(r#"COPY "user_roles" ("assigned_at", "role_name", "user_id") FROM STDIN WITH (FORMAT csv)"#).await?;
+        for chunk in items.chunks(1000) {
+            let est: usize = chunk
+                .iter()
+                .map(|item| {
+                    let mut s = 0usize;
+                    let _ = item;
+                    s += 32;
+                    s += item.role_name.len() + 2;
+                    s += 32;
+                    s
+                })
+                .sum();
+            let mut payload = String::with_capacity(est);
             #[allow(unused_imports)]
             use std::fmt::Write;
             for item in chunk {
@@ -192,7 +184,8 @@ impl UserRoles {
         user_id: i64,
         limit: i64,
     ) -> sqlx::Result<Vec<Self>> {
-        let query = r#"SELECT "assigned_at", "role_name", "user_id" FROM user_roles WHERE "user_id" = $1 ORDER BY "user_id" ASC LIMIT $2"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT "assigned_at", "role_name", "user_id" FROM "user_roles" WHERE "user_id" = $1 ORDER BY "user_id" ASC LIMIT $2"#;
         sqlx::query_as::<_, Self>(query)
             .bind(user_id)
             .bind(limit)
@@ -208,7 +201,8 @@ impl UserRoles {
         user_id: i64,
         limit: i64,
     ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let query = r#"SELECT "assigned_at", "role_name", "user_id" FROM user_roles WHERE "user_id" = $1 ORDER BY "user_id" ASC LIMIT $2"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT "assigned_at", "role_name", "user_id" FROM "user_roles" WHERE "user_id" = $1 ORDER BY "user_id" ASC LIMIT $2"#;
         sqlx::query_as::<_, Self>(query)
             .bind(user_id)
             .bind(limit)
@@ -219,7 +213,7 @@ impl UserRoles {
         executor: E,
         user_id: i64,
     ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM user_roles WHERE "user_id" = $1 LIMIT 1"#;
+        let query = r#"SELECT 1 FROM "user_roles" WHERE "user_id" = $1 LIMIT 1"#;
         let exists: Option<(i32,)> = sqlx::query_as(query)
             .bind(user_id)
             .fetch_optional(executor)
@@ -231,7 +225,7 @@ impl UserRoles {
         executor: E,
         user_id: i64,
     ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM user_roles WHERE "user_id" = $1"#;
+        let query = r#"DELETE FROM "user_roles" WHERE "user_id" = $1"#;
         let result = sqlx::query::<sqlx::Postgres>(query)
             .bind(user_id)
             .execute(executor)
@@ -245,9 +239,9 @@ impl UserRoles {
     >(
         executor: E,
         user_id: i64,
-        role_name: &String,
+        role_name: &str,
     ) -> sqlx::Result<Option<Self>> {
-        let query = r#"SELECT "assigned_at", "role_name", "user_id" FROM user_roles WHERE "user_id" = $1 AND "role_name" = $2"#;
+        let query = r#"SELECT "assigned_at", "role_name", "user_id" FROM "user_roles" WHERE "user_id" = $1 AND "role_name" = $2"#;
         sqlx::query_as::<_, Self>(query)
             .bind(user_id)
             .bind(role_name)
@@ -261,9 +255,10 @@ impl UserRoles {
     >(
         executor: E,
         user_id: i64,
-        role_name: &String,
+        role_name: &str,
     ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM user_roles WHERE "user_id" = $1 AND "role_name" = $2 LIMIT 1"#;
+        let query =
+            r#"SELECT 1 FROM "user_roles" WHERE "user_id" = $1 AND "role_name" = $2 LIMIT 1"#;
         let exists: Option<(i32,)> = sqlx::query_as(query)
             .bind(user_id)
             .bind(role_name)
@@ -278,9 +273,9 @@ impl UserRoles {
     >(
         executor: E,
         user_id: i64,
-        role_name: &String,
+        role_name: &str,
     ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM user_roles WHERE "user_id" = $1 AND "role_name" = $2"#;
+        let query = r#"DELETE FROM "user_roles" WHERE "user_id" = $1 AND "role_name" = $2"#;
         let result = sqlx::query::<sqlx::Postgres>(query)
             .bind(user_id)
             .bind(role_name)

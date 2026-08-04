@@ -84,6 +84,26 @@ impl CompTypesMatView {
     #[allow(unused_comparisons)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.f_date.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("f_date: format constraint not met".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.f_datetime.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("f_datetime: format constraint not met".into());
+            }
+        }
         if let Some(v) = self.f_int.as_ref() {
             if (*v as i64) < 0 {
                 errors.push("f_int: minimum value '0' not met".into());
@@ -92,6 +112,36 @@ impl CompTypesMatView {
         if let Some(v) = self.f_int.as_ref() {
             if (*v as i64) > 2147483647 {
                 errors.push("f_int: maximum value '2147483647' exceeded".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.f_text.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("f_text: format constraint not met".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.f_timestamp.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("f_timestamp: format constraint not met".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.f_varchar.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("f_varchar: format constraint not met".into());
             }
         }
         if let Some(v) = self.id.as_ref() {
@@ -121,7 +171,7 @@ impl CompTypesMatView {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT COUNT(*) FROM comp_types_mat_view"#;
+        let query = r#"SELECT COUNT(*) FROM `comp_types_mat_view`"#;
         let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
         Ok(count as u64)
     }
@@ -131,7 +181,7 @@ impl CompTypesMatView {
     pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT MAX(rowid) FROM comp_types_mat_view"#;
+        let query = r#"SELECT MAX(rowid) FROM `comp_types_mat_view`"#;
         let count: Option<(Option<i64>,)> = sqlx::query_as(query).fetch_optional(executor).await?;
         Ok(count
             .and_then(|(c,)| c)
@@ -146,44 +196,16 @@ impl CompTypesMatView {
         executor: E,
         limit: i64,
     ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let query = r#"SELECT `f_blob`, `f_bool`, `f_date`, `f_datetime`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_json`, `f_text`, `f_timestamp`, `f_varchar`, `id` FROM comp_types_mat_view ORDER BY `id` ASC LIMIT ?"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT `f_blob`, `f_bool`, `f_date`, `f_datetime`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_json`, `f_text`, `f_timestamp`, `f_varchar`, `id` FROM `comp_types_mat_view` ORDER BY `id` ASC LIMIT ?"#;
         sqlx::query_as::<_, Self>(query).bind(limit).fetch(executor)
-    }
-
-    #[deprecated(note = "Use list_by_cursor for large datasets")]
-    pub async fn list_paginated<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
-        executor: E,
-        order_by: &[CompTypesMatViewOrderBy],
-        page: u32,
-        page_size: u32,
-    ) -> sqlx::Result<Vec<Self>> {
-        if order_by.is_empty() {
-            return Err(sqlx::Error::Protocol("ORDER BY cannot be empty".into()));
-        }
-        let page_size = page_size.clamp(1, 10000);
-        let offset = page.saturating_sub(1) * page_size;
-        let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
-            r#"SELECT `f_blob`, `f_bool`, `f_date`, `f_datetime`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_json`, `f_text`, `f_timestamp`, `f_varchar`, `id` FROM comp_types_mat_view"#,
-        );
-        qb.push(" ORDER BY ");
-        for (i, o) in order_by.iter().enumerate() {
-            if i > 0 {
-                qb.push(", ");
-            }
-            qb.push(o.as_str());
-        }
-        qb.push(" LIMIT ");
-        qb.push_bind(page_size as i64);
-        qb.push(" OFFSET ");
-        qb.push_bind(offset as i64);
-        qb.build_query_as::<Self>().fetch_all(executor).await
     }
 
     pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"INSERT INTO comp_types_mat_view (`f_blob`, `f_bool`, `f_date`, `f_datetime`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_json`, `f_text`, `f_timestamp`, `f_varchar`, `id`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#;
+        let query = r#"INSERT INTO `comp_types_mat_view` (`f_blob`, `f_bool`, `f_date`, `f_datetime`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_json`, `f_text`, `f_timestamp`, `f_varchar`, `id`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#;
         let result = sqlx::query::<sqlx::Sqlite>(query)
             .bind(&self.f_blob)
             .bind(&self.f_bool)
@@ -216,7 +238,7 @@ impl CompTypesMatView {
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
             let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
-                r#"INSERT INTO comp_types_mat_view (`f_blob`, `f_bool`, `f_date`, `f_datetime`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_json`, `f_text`, `f_timestamp`, `f_varchar`, `id`) "#,
+                r#"INSERT INTO `comp_types_mat_view` (`f_blob`, `f_bool`, `f_date`, `f_datetime`, `f_decimal`, `f_double`, `f_float`, `f_int`, `f_json`, `f_text`, `f_timestamp`, `f_varchar`, `id`) "#,
             );
             qb.push_values(chunk, |mut b, item| {
                 b.push_bind(&item.f_blob);

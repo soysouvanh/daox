@@ -39,14 +39,44 @@ impl ProductMetadata {
     #[allow(unused_comparisons)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.attributes.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("attributes: format constraint not met".into());
+            }
+        }
         if let Some(v) = Some(&self.category) {
             if v.len() < 1 {
                 errors.push("category: min_length 1 not met".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.category) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("category: format constraint not met".into());
+            }
+        }
         if let Some(v) = Some(&self.id) {
             if v.len() < 1 {
                 errors.push("id: min_length 1 not met".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.id) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("id: format constraint not met".into());
             }
         }
         if errors.is_empty() {
@@ -66,7 +96,7 @@ impl ProductMetadata {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT COUNT(*) FROM product_metadata"#;
+        let query = r#"SELECT COUNT(*) FROM `product_metadata`"#;
         let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
         Ok(count as u64)
     }
@@ -76,7 +106,7 @@ impl ProductMetadata {
     pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT MAX(rowid) FROM product_metadata"#;
+        let query = r#"SELECT MAX(rowid) FROM `product_metadata`"#;
         let count: Option<(Option<i64>,)> = sqlx::query_as(query).fetch_optional(executor).await?;
         Ok(count
             .and_then(|(c,)| c)
@@ -91,7 +121,8 @@ impl ProductMetadata {
         executor: E,
         limit: i64,
     ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let query = r#"SELECT `attributes`, `category`, `id`, `raw_data` FROM product_metadata ORDER BY `id` ASC LIMIT ?"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT `attributes`, `category`, `id`, `raw_data` FROM `product_metadata` ORDER BY `id` ASC LIMIT ?"#;
         sqlx::query_as::<_, Self>(query).bind(limit).fetch(executor)
     }
 
@@ -99,7 +130,7 @@ impl ProductMetadata {
         executor: E,
         id: &str,
     ) -> sqlx::Result<Option<Self>> {
-        let query = r#"SELECT `attributes`, `category`, `id`, `raw_data` FROM product_metadata WHERE `id` = ?"#;
+        let query = r#"SELECT `attributes`, `category`, `id`, `raw_data` FROM `product_metadata` WHERE `id` = ?"#;
         sqlx::query_as::<_, Self>(query)
             .bind(id)
             .fetch_optional(executor)
@@ -110,7 +141,7 @@ impl ProductMetadata {
         executor: E,
         id: &str,
     ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM product_metadata WHERE `id` = ? LIMIT 1"#;
+        let query = r#"SELECT 1 FROM `product_metadata` WHERE `id` = ? LIMIT 1"#;
         let exists: Option<(i32,)> = sqlx::query_as(query)
             .bind(id)
             .fetch_optional(executor)
@@ -123,7 +154,8 @@ impl ProductMetadata {
         last_id: &str,
         limit: u32,
     ) -> sqlx::Result<Vec<Self>> {
-        let query = r#"SELECT `attributes`, `category`, `id`, `raw_data` FROM product_metadata WHERE `id` > ? ORDER BY `id` ASC LIMIT ?"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT `attributes`, `category`, `id`, `raw_data` FROM `product_metadata` WHERE `id` > ? ORDER BY `id` ASC LIMIT ?"#;
         sqlx::query_as::<_, Self>(query)
             .bind(last_id)
             .bind(limit as i64)
@@ -135,7 +167,7 @@ impl ProductMetadata {
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"INSERT INTO product_metadata (`attributes`, `category`, `id`, `raw_data`) VALUES (?, ?, ?, ?)"#;
+        let query = r#"INSERT INTO `product_metadata` (`attributes`, `category`, `id`, `raw_data`) VALUES (?, ?, ?, ?)"#;
         let result = sqlx::query::<sqlx::Sqlite>(query)
             .bind(&self.attributes)
             .bind(&self.category)
@@ -159,7 +191,7 @@ impl ProductMetadata {
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
             let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
-                r#"INSERT INTO product_metadata (`attributes`, `category`, `id`, `raw_data`) "#,
+                r#"INSERT INTO `product_metadata` (`attributes`, `category`, `id`, `raw_data`) "#,
             );
             qb.push_values(chunk, |mut b, item| {
                 b.push_bind(&item.attributes);
@@ -177,7 +209,7 @@ impl ProductMetadata {
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"INSERT INTO product_metadata (`attributes`, `category`, `id`, `raw_data`) VALUES (?, ?, ?, ?) ON CONFLICT (`id`) DO UPDATE SET `attributes` = EXCLUDED.`attributes`, `category` = EXCLUDED.`category`, `raw_data` = EXCLUDED.`raw_data`"#;
+        let query = r#"INSERT INTO `product_metadata` (`attributes`, `category`, `id`, `raw_data`) VALUES (?, ?, ?, ?) ON CONFLICT (`id`) DO UPDATE SET `attributes` = EXCLUDED.`attributes`, `category` = EXCLUDED.`category`, `raw_data` = EXCLUDED.`raw_data`"#;
         let result = sqlx::query::<sqlx::Sqlite>(query)
             .bind(&self.attributes)
             .bind(&self.category)
@@ -201,7 +233,7 @@ impl ProductMetadata {
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
             let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
-                r#"INSERT INTO product_metadata (`attributes`, `category`, `id`, `raw_data`) "#,
+                r#"INSERT INTO `product_metadata` (`attributes`, `category`, `id`, `raw_data`) "#,
             );
             qb.push_values(chunk, |mut b, item| {
                 b.push_bind(&item.attributes);
@@ -209,7 +241,7 @@ impl ProductMetadata {
                 b.push_bind(&item.id);
                 b.push_bind(&item.raw_data);
             });
-            qb.push(" ON CONFLICT (`id`) DO UPDATE SET `attributes` = EXCLUDED.`attributes`, `category` = EXCLUDED.`category`, `raw_data` = EXCLUDED.`raw_data`");
+            qb.push(r#" ON CONFLICT (`id`) DO UPDATE SET `attributes` = EXCLUDED.`attributes`, `category` = EXCLUDED.`category`, `raw_data` = EXCLUDED.`raw_data`"#);
             let result = qb.build().execute(&mut **executor).await?;
             total_affected += result.rows_affected();
         }
@@ -220,7 +252,7 @@ impl ProductMetadata {
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query_str = r#"UPDATE product_metadata SET `attributes` = ?, `category` = ?, `raw_data` = ? WHERE `id` = ?"#;
+        let query_str = r#"UPDATE `product_metadata` SET `attributes` = ?, `category` = ?, `raw_data` = ? WHERE `id` = ?"#;
         let mut query = sqlx::query::<sqlx::Sqlite>(query_str);
         query = query.bind(&self.attributes);
         query = query.bind(&self.category);
@@ -232,9 +264,9 @@ impl ProductMetadata {
 
     pub async fn delete_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         executor: E,
-        id: &String,
+        id: &str,
     ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM product_metadata WHERE `id` = ?"#;
+        let query = r#"DELETE FROM `product_metadata` WHERE `id` = ?"#;
         let result = sqlx::query::<sqlx::Sqlite>(query)
             .bind(id)
             .execute(executor)
@@ -244,16 +276,16 @@ impl ProductMetadata {
 
     pub async fn delete_many_by_id<'e>(
         executor: &mut sqlx::Transaction<'e, sqlx::Sqlite>,
-        ids: &[String],
+        ids: &[&str],
     ) -> sqlx::Result<u64> {
         if ids.is_empty() {
             return Ok(0);
         }
         let mut total_affected = 0;
-        let chunk_size = 500_usize.min(32766);
+        let chunk_size = 5000_usize.min(32766);
         for chunk in ids.chunks(chunk_size) {
             let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> =
-                sqlx::QueryBuilder::new(r#"DELETE FROM product_metadata WHERE `id` IN "#);
+                sqlx::QueryBuilder::new(r#"DELETE FROM `product_metadata` WHERE `id` IN "#);
             qb.push("(");
             let mut sep = qb.separated(", ");
             for id in chunk {
@@ -272,83 +304,38 @@ impl ProductMetadata {
         id: &str,
         patch: &ProductMetadataPatch,
     ) -> sqlx::Result<u64> {
-        let mut bits = [0u8; 1];
+        let mut mask = 0u64;
         let mut has = false;
         if patch.attributes.is_some() {
-            bits[0] |= 1 << 0;
+            mask |= 1 << 0;
             has = true;
         }
         if patch.category.is_some() {
-            bits[0] |= 1 << 1;
+            mask |= 1 << 1;
             has = true;
         }
         if patch.raw_data.is_some() {
-            bits[0] |= 1 << 2;
+            mask |= 1 << 2;
             has = true;
         }
         if !has {
             return Ok(0);
         }
 
-        static CACHE: std::sync::OnceLock<
-            [std::sync::RwLock<std::collections::HashMap<[u8; 1], String>>; 16],
-        > = std::sync::OnceLock::new();
-        let cache_shards = CACHE.get_or_init(|| {
-            std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()))
-        });
-        let shard_idx = bits
-            .iter()
-            .fold(0usize, |acc, &b| acc.wrapping_add(b as usize) ^ (acc << 3))
-            % 16;
-        let cache_lock = &cache_shards[shard_idx];
-        let query_str = {
-            let read = cache_lock.read().unwrap();
-            if let Some(q) = read.get(&bits) {
-                q.clone()
-            } else {
-                drop(read);
-                let mut write = cache_lock.write().unwrap();
-                if let Some(q) = write.get(&bits) {
-                    q.clone()
-                } else {
-                    let mut q = String::with_capacity(352);
-                    q.push_str("UPDATE product_metadata SET ");
-                    let mut first = true;
-                    if patch.attributes.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`attributes` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    if patch.category.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`category` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    if patch.raw_data.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`raw_data` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    q.push_str(r#" WHERE `id` = "#);
-                    q.push_str("?");
-                    if write.len() < 1000 {
-                        write.insert(bits, q.clone());
-                    }
-                    q
-                }
+        let query_str = match mask {
+            1 => r#"UPDATE `product_metadata` SET `attributes` = ? WHERE `id` = ?"#,
+            2 => r#"UPDATE `product_metadata` SET `category` = ? WHERE `id` = ?"#,
+            3 => r#"UPDATE `product_metadata` SET `attributes` = ?, `category` = ? WHERE `id` = ?"#,
+            4 => r#"UPDATE `product_metadata` SET `raw_data` = ? WHERE `id` = ?"#,
+            5 => r#"UPDATE `product_metadata` SET `attributes` = ?, `raw_data` = ? WHERE `id` = ?"#,
+            6 => r#"UPDATE `product_metadata` SET `category` = ?, `raw_data` = ? WHERE `id` = ?"#,
+            7 => {
+                r#"UPDATE `product_metadata` SET `attributes` = ?, `category` = ?, `raw_data` = ? WHERE `id` = ?"#
             }
+            _ => unreachable!(),
         };
 
-        let mut query = sqlx::query::<sqlx::Sqlite>(sqlx::AssertSqlSafe(query_str.as_str()));
+        let mut query = sqlx::query::<sqlx::Sqlite>(query_str);
         if let Some(val) = &patch.attributes {
             query = query.bind(val);
         }

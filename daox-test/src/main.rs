@@ -170,29 +170,29 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
 
     // --- INDEX METHODS ---
     assert!(
-        Users::exists_by_email(&pool, &"alice@daox.dev".into())
+        Users::exists_by_email(&pool, "alice@daox.dev")
             .await
             .unwrap()
     );
     assert!(
-        Users::get_by_email(&pool, &"alice@daox.dev".into())
+        Users::get_by_email(&pool, "alice@daox.dev")
             .await
             .unwrap()
             .is_some()
     );
-    let ls = Users::list_by_first_name_and_last_name(&pool, &"Bot1".into(), &"Batch".into(), 10)
+    let ls = Users::list_by_first_name_and_last_name(&pool, "Bot1", "Batch", 10)
         .await
         .unwrap();
     assert!(!ls.is_empty());
     assert!(
-        Users::exists_by_first_name_and_last_name(&pool, &"Bot1".into(), &"Batch".into())
+        Users::exists_by_first_name_and_last_name(&pool, "Bot1", "Batch")
             .await
             .unwrap()
     );
-    Users::delete_by_first_name_and_last_name(&pool, &"Bot2".into(), &"Batch".into())
+    Users::delete_by_first_name_and_last_name(&pool, "Bot2", "Batch")
         .await
         .unwrap();
-    Users::delete_by_email(&pool, &"alice@daox.dev".into())
+    Users::delete_by_email(&pool, "alice@daox.dev")
         .await
         .unwrap();
 
@@ -219,7 +219,7 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
         user_tx.insert(&mut *tx).await.unwrap();
         tx.rollback().await?;
     }
-    let exists_rollback = Users::exists_by_email(&pool, &"tx_rollback_pg@daox.dev".to_string())
+    let exists_rollback = Users::exists_by_email(&pool, "tx_rollback_pg@daox.dev")
         .await
         .unwrap();
     assert!(!exists_rollback);
@@ -238,7 +238,7 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
         user_tx2.insert(&mut *tx).await.unwrap();
         tx.commit().await?;
     }
-    let exists_commit = Users::exists_by_email(&pool, &"tx_commit_pg@daox.dev".to_string())
+    let exists_commit = Users::exists_by_email(&pool, "tx_commit_pg@daox.dev")
         .await
         .unwrap();
     assert!(exists_commit);
@@ -392,29 +392,29 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
 
     // --- INDEX METHODS ---
     assert!(
-        Users::exists_by_email(&pool, &"bob@daox.dev".into())
+        Users::exists_by_email(&pool, "bob@daox.dev")
             .await
             .unwrap()
     );
     assert!(
-        Users::get_by_email(&pool, &"bob@daox.dev".into())
+        Users::get_by_email(&pool, "bob@daox.dev")
             .await
             .unwrap()
             .is_some()
     );
-    let ls = Users::list_by_last_name_and_first_name(&pool, &"Batch".into(), &"Worker1".into(), 10)
+    let ls = Users::list_by_last_name_and_first_name(&pool, "Batch", "Worker1", 10)
         .await
         .unwrap();
     assert!(!ls.is_empty());
     assert!(
-        Users::exists_by_last_name_and_first_name(&pool, &"Batch".into(), &"Worker1".into())
+        Users::exists_by_last_name_and_first_name(&pool, "Batch", "Worker1")
             .await
             .unwrap()
     );
-    Users::delete_by_last_name_and_first_name(&pool, &"Batch".into(), &"Worker2".into())
+    Users::delete_by_last_name_and_first_name(&pool, "Batch", "Worker2")
         .await
         .unwrap();
-    Users::delete_by_email(&pool, &"bob@daox.dev".into())
+    Users::delete_by_email(&pool, "bob@daox.dev")
         .await
         .unwrap();
 
@@ -441,7 +441,7 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
         user_tx.insert(&mut *tx).await.unwrap();
         tx.rollback().await?;
     }
-    let exists_rollback = Users::exists_by_email(&pool, &"tx_rollback_mysql@daox.dev".to_string())
+    let exists_rollback = Users::exists_by_email(&pool, "tx_rollback_mysql@daox.dev")
         .await
         .unwrap();
     assert!(!exists_rollback);
@@ -460,7 +460,7 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
         user_tx2.insert(&mut *tx).await.unwrap();
         tx.commit().await?;
     }
-    let exists_commit = Users::exists_by_email(&pool, &"tx_commit_mysql@daox.dev".to_string())
+    let exists_commit = Users::exists_by_email(&pool, "tx_commit_mysql@daox.dev")
         .await
         .unwrap();
     assert!(exists_commit);
@@ -583,7 +583,7 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
     upsert_user.email = "upsert1_sqlite@sqlite.dev".into();
     upsert_user.status = "active_upsert".into();
     upsert_user.upsert(&pool).await.unwrap();
-    let check_upsert = Users::get_by_email(&pool, &"upsert1_sqlite@sqlite.dev".into())
+    let check_upsert = Users::get_by_email(&pool, "upsert1_sqlite@sqlite.dev")
         .await
         .unwrap()
         .unwrap();
@@ -597,7 +597,7 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
         .await
         .unwrap();
     tx_upsert.commit().await.unwrap();
-    let check_upsert_batch = Users::get_by_email(&pool, &"upsert2_sqlite@sqlite.dev".into())
+    let check_upsert_batch = Users::get_by_email(&pool, "upsert2_sqlite@sqlite.dev")
         .await
         .unwrap()
         .unwrap();
@@ -619,29 +619,29 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
 
     // --- INDEX METHODS ---
     assert!(
-        Users::exists_by_email(&pool, &"alice@sqlite.dev".into())
+        Users::exists_by_email(&pool, "alice@sqlite.dev")
             .await
             .unwrap()
     );
     assert!(
-        Users::get_by_email(&pool, &"alice@sqlite.dev".into())
+        Users::get_by_email(&pool, "alice@sqlite.dev")
             .await
             .unwrap()
             .is_some()
     );
-    let ls = Users::list_by_last_name_and_first_name(&pool, &"Batch".into(), &"Worker1".into(), 10)
+    let ls = Users::list_by_last_name_and_first_name(&pool, "Batch", "Worker1", 10)
         .await
         .unwrap();
     assert!(!ls.is_empty());
     assert!(
-        Users::exists_by_last_name_and_first_name(&pool, &"Batch".into(), &"Worker1".into())
+        Users::exists_by_last_name_and_first_name(&pool, "Batch", "Worker1")
             .await
             .unwrap()
     );
-    Users::delete_by_last_name_and_first_name(&pool, &"Batch".into(), &"Worker2".into())
+    Users::delete_by_last_name_and_first_name(&pool, "Batch", "Worker2")
         .await
         .unwrap();
-    Users::delete_by_email(&pool, &"alice@sqlite.dev".into())
+    Users::delete_by_email(&pool, "alice@sqlite.dev")
         .await
         .unwrap();
 
@@ -668,7 +668,7 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
         user_tx.insert(&mut *tx).await.unwrap();
         tx.rollback().await?;
     }
-    let exists_rollback = Users::exists_by_email(&pool, &"tx_rollback_sqlite@daox.dev".to_string())
+    let exists_rollback = Users::exists_by_email(&pool, "tx_rollback_sqlite@daox.dev")
         .await
         .unwrap();
     assert!(!exists_rollback);
@@ -687,7 +687,7 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
         user_tx2.insert(&mut *tx).await.unwrap();
         tx.commit().await?;
     }
-    let exists_commit = Users::exists_by_email(&pool, &"tx_commit_sqlite@daox.dev".to_string())
+    let exists_commit = Users::exists_by_email(&pool, "tx_commit_sqlite@daox.dev")
         .await
         .unwrap();
     assert!(exists_commit);

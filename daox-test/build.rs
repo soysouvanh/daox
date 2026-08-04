@@ -10,8 +10,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=../daox/src");
 
     // Re-run if schema files change
-    println!("cargo:rerun-if-changed=../.daox_schema");
-    println!("cargo:rerun-if-changed=../overrides");
+    println!("cargo:rerun-if-changed=src/models_mysql/.daox_schema");
+    println!("cargo:rerun-if-changed=src/models_mysql/overrides");
+    println!("cargo:rerun-if-changed=src/models_pg/.daox_schema");
+    println!("cargo:rerun-if-changed=src/models_pg/overrides");
+    println!("cargo:rerun-if-changed=src/models_sqlite/.daox_schema");
+    println!("cargo:rerun-if-changed=src/models_sqlite/overrides");
 
     // Database connection URLs
     let mysql_url = std::env::var("DATABASE_URL_MYSQL").map_err(|e| {

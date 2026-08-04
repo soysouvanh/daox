@@ -39,6 +39,27 @@ impl ActiveUsers {
     #[allow(unused_comparisons)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.email.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$")
+                    .expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("email: format constraint not met".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.first_name.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("first_name: format constraint not met".into());
+            }
+        }
         if let Some(v) = self.id.as_ref() {
             if (*v as i64) < 0 {
                 errors.push("id: minimum value '0' not met".into());
@@ -47,6 +68,16 @@ impl ActiveUsers {
         if let Some(v) = self.id.as_ref() {
             if (*v as i64) > 2147483647 {
                 errors.push("id: maximum value '2147483647' exceeded".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.last_name.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("last_name: format constraint not met".into());
             }
         }
         if errors.is_empty() {
@@ -66,7 +97,7 @@ impl ActiveUsers {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT COUNT(*) FROM active_users"#;
+        let query = r#"SELECT COUNT(*) FROM `active_users`"#;
         let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
         Ok(count as u64)
     }
@@ -86,36 +117,8 @@ impl ActiveUsers {
         executor: E,
         limit: i64,
     ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let query = r#"SELECT `email`, `first_name`, `id`, `last_name` FROM active_users ORDER BY `id` ASC LIMIT ?"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT `email`, `first_name`, `id`, `last_name` FROM `active_users` ORDER BY `id` ASC LIMIT ?"#;
         sqlx::query_as::<_, Self>(query).bind(limit).fetch(executor)
-    }
-
-    #[deprecated(note = "Use list_by_cursor for large datasets")]
-    pub async fn list_paginated<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
-        executor: E,
-        order_by: &[ActiveUsersOrderBy],
-        page: u32,
-        page_size: u32,
-    ) -> sqlx::Result<Vec<Self>> {
-        if order_by.is_empty() {
-            return Err(sqlx::Error::Protocol("ORDER BY cannot be empty".into()));
-        }
-        let page_size = page_size.clamp(1, 10000);
-        let offset = page.saturating_sub(1) * page_size;
-        let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
-            r#"SELECT `email`, `first_name`, `id`, `last_name` FROM active_users"#,
-        );
-        qb.push(" ORDER BY ");
-        for (i, o) in order_by.iter().enumerate() {
-            if i > 0 {
-                qb.push(", ");
-            }
-            qb.push(o.as_str());
-        }
-        qb.push(" LIMIT ");
-        qb.push_bind(page_size as i64);
-        qb.push(" OFFSET ");
-        qb.push_bind(offset as i64);
-        qb.build_query_as::<Self>().fetch_all(executor).await
     }
 }

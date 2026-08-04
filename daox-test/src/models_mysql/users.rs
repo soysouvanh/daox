@@ -59,9 +59,30 @@ impl Users {
                 errors.push("email: exceeds max_length 255".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.email) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$")
+                    .expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("email: format constraint not met".into());
+            }
+        }
         if let Some(v) = self.first_name.as_ref() {
             if v.len() > 100 {
                 errors.push("first_name: exceeds max_length 100".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.first_name.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("first_name: format constraint not met".into());
             }
         }
         if let Some(v) = Some(&self.id) {
@@ -84,6 +105,16 @@ impl Users {
                 errors.push("last_name: exceeds max_length 100".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.last_name) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("last_name: format constraint not met".into());
+            }
+        }
         if let Some(v) = Some(&self.status) {
             if v.len() < 1 {
                 errors.push("status: min_length 1 not met".into());
@@ -92,6 +123,16 @@ impl Users {
         if let Some(v) = Some(&self.status) {
             if v.len() > 50 {
                 errors.push("status: exceeds max_length 50".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.status) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("status: format constraint not met".into());
             }
         }
         if errors.is_empty() {
@@ -111,7 +152,7 @@ impl Users {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT COUNT(*) FROM users"#;
+        let query = r#"SELECT COUNT(*) FROM `users`"#;
         let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
         Ok(count as u64)
     }
@@ -133,7 +174,8 @@ impl Users {
         executor: E,
         limit: i64,
     ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let query = r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM users ORDER BY `id` ASC LIMIT ?"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM `users` ORDER BY `id` ASC LIMIT ?"#;
         sqlx::query_as::<_, Self>(query).bind(limit).fetch(executor)
     }
 
@@ -141,7 +183,7 @@ impl Users {
         executor: E,
         id: i64,
     ) -> sqlx::Result<Option<Self>> {
-        let query = r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM users WHERE `id` = ?"#;
+        let query = r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM `users` WHERE `id` = ?"#;
         sqlx::query_as::<_, Self>(query)
             .bind(id)
             .fetch_optional(executor)
@@ -152,7 +194,7 @@ impl Users {
         executor: E,
         id: i64,
     ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM users WHERE `id` = ? LIMIT 1"#;
+        let query = r#"SELECT 1 FROM `users` WHERE `id` = ? LIMIT 1"#;
         let exists: Option<(i32,)> = sqlx::query_as(query)
             .bind(id)
             .fetch_optional(executor)
@@ -165,7 +207,8 @@ impl Users {
         last_id: i64,
         limit: u32,
     ) -> sqlx::Result<Vec<Self>> {
-        let query = r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM users WHERE `id` > ? ORDER BY `id` ASC LIMIT ?"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM `users` WHERE `id` > ? ORDER BY `id` ASC LIMIT ?"#;
         sqlx::query_as::<_, Self>(query)
             .bind(last_id)
             .bind(limit as i64)
@@ -177,7 +220,7 @@ impl Users {
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"INSERT INTO users (`created_at`, `email`, `first_name`, `last_name`, `status`) VALUES (?, ?, ?, ?, ?)"#;
+        let query = r#"INSERT INTO `users` (`created_at`, `email`, `first_name`, `last_name`, `status`) VALUES (?, ?, ?, ?, ?)"#;
         let result = sqlx::query::<sqlx::MySql>(query)
             .bind(&self.created_at)
             .bind(&self.email)
@@ -202,7 +245,7 @@ impl Users {
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
             let mut qb: sqlx::QueryBuilder<sqlx::MySql> = sqlx::QueryBuilder::new(
-                r#"INSERT INTO users (`created_at`, `email`, `first_name`, `last_name`, `status`) "#,
+                r#"INSERT INTO `users` (`created_at`, `email`, `first_name`, `last_name`, `status`) "#,
             );
             qb.push_values(chunk, |mut b, item| {
                 b.push_bind(&item.created_at);
@@ -221,7 +264,7 @@ impl Users {
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"INSERT INTO users (`created_at`, `email`, `first_name`, `last_name`, `status`) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE `created_at` = VALUES(`created_at`), `email` = VALUES(`email`), `first_name` = VALUES(`first_name`), `last_name` = VALUES(`last_name`), `status` = VALUES(`status`)"#;
+        let query = r#"INSERT INTO `users` (`created_at`, `email`, `first_name`, `last_name`, `status`) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE `created_at` = VALUES(`created_at`), `email` = VALUES(`email`), `first_name` = VALUES(`first_name`), `last_name` = VALUES(`last_name`), `status` = VALUES(`status`)"#;
         let result = sqlx::query::<sqlx::MySql>(query)
             .bind(&self.created_at)
             .bind(&self.email)
@@ -246,7 +289,7 @@ impl Users {
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
             let mut qb: sqlx::QueryBuilder<sqlx::MySql> = sqlx::QueryBuilder::new(
-                r#"INSERT INTO users (`created_at`, `email`, `first_name`, `last_name`, `status`) "#,
+                r#"INSERT INTO `users` (`created_at`, `email`, `first_name`, `last_name`, `status`) "#,
             );
             qb.push_values(chunk, |mut b, item| {
                 b.push_bind(&item.created_at);
@@ -255,7 +298,7 @@ impl Users {
                 b.push_bind(&item.last_name);
                 b.push_bind(&item.status);
             });
-            qb.push(" ON DUPLICATE KEY UPDATE `created_at` = VALUES(`created_at`), `email` = VALUES(`email`), `first_name` = VALUES(`first_name`), `last_name` = VALUES(`last_name`), `status` = VALUES(`status`)");
+            qb.push(r#" ON DUPLICATE KEY UPDATE `created_at` = VALUES(`created_at`), `email` = VALUES(`email`), `first_name` = VALUES(`first_name`), `last_name` = VALUES(`last_name`), `status` = VALUES(`status`)"#);
             let result = qb.build().execute(&mut **executor).await?;
             total_affected += result.rows_affected();
         }
@@ -266,7 +309,7 @@ impl Users {
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query_str = r#"UPDATE users SET `created_at` = ?, `email` = ?, `first_name` = ?, `last_name` = ?, `status` = ? WHERE `id` = ?"#;
+        let query_str = r#"UPDATE `users` SET `created_at` = ?, `email` = ?, `first_name` = ?, `last_name` = ?, `status` = ? WHERE `id` = ?"#;
         let mut query = sqlx::query::<sqlx::MySql>(query_str);
         query = query.bind(&self.created_at);
         query = query.bind(&self.email);
@@ -282,7 +325,7 @@ impl Users {
         executor: E,
         id: i64,
     ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM users WHERE `id` = ?"#;
+        let query = r#"DELETE FROM `users` WHERE `id` = ?"#;
         let result = sqlx::query::<sqlx::MySql>(query)
             .bind(id)
             .execute(executor)
@@ -301,7 +344,7 @@ impl Users {
         let chunk_size = 5000_usize.min(65535);
         for chunk in ids.chunks(chunk_size) {
             let mut qb: sqlx::QueryBuilder<sqlx::MySql> =
-                sqlx::QueryBuilder::new(r#"DELETE FROM users WHERE `id` IN "#);
+                sqlx::QueryBuilder::new(r#"DELETE FROM `users` WHERE `id` IN "#);
             qb.push("(");
             let mut sep = qb.separated(", ");
             for id in chunk {
@@ -320,107 +363,98 @@ impl Users {
         id: i64,
         patch: &UsersPatch,
     ) -> sqlx::Result<u64> {
-        let mut bits = [0u8; 1];
+        let mut mask = 0u64;
         let mut has = false;
         if patch.created_at.is_some() {
-            bits[0] |= 1 << 0;
+            mask |= 1 << 0;
             has = true;
         }
         if patch.email.is_some() {
-            bits[0] |= 1 << 1;
+            mask |= 1 << 1;
             has = true;
         }
         if patch.first_name.is_some() {
-            bits[0] |= 1 << 2;
+            mask |= 1 << 2;
             has = true;
         }
         if patch.last_name.is_some() {
-            bits[0] |= 1 << 3;
+            mask |= 1 << 3;
             has = true;
         }
         if patch.status.is_some() {
-            bits[0] |= 1 << 4;
+            mask |= 1 << 4;
             has = true;
         }
         if !has {
             return Ok(0);
         }
 
-        static CACHE: std::sync::OnceLock<
-            [std::sync::RwLock<std::collections::HashMap<[u8; 1], String>>; 16],
-        > = std::sync::OnceLock::new();
-        let cache_shards = CACHE.get_or_init(|| {
-            std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()))
-        });
-        let shard_idx = bits
-            .iter()
-            .fold(0usize, |acc, &b| acc.wrapping_add(b as usize) ^ (acc << 3))
-            % 16;
-        let cache_lock = &cache_shards[shard_idx];
-        let query_str = {
-            let read = cache_lock.read().unwrap();
-            if let Some(q) = read.get(&bits) {
-                q.clone()
-            } else {
-                drop(read);
-                let mut write = cache_lock.write().unwrap();
-                if let Some(q) = write.get(&bits) {
-                    q.clone()
-                } else {
-                    let mut q = String::with_capacity(416);
-                    q.push_str("UPDATE users SET ");
-                    let mut first = true;
-                    if patch.created_at.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`created_at` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    if patch.email.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`email` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    if patch.first_name.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`first_name` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    if patch.last_name.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`last_name` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    if patch.status.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`status` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    q.push_str(r#" WHERE `id` = "#);
-                    q.push_str("?");
-                    if write.len() < 1000 {
-                        write.insert(bits, q.clone());
-                    }
-                    q
-                }
+        let query_str = match mask {
+            1 => r#"UPDATE `users` SET `created_at` = ? WHERE `id` = ?"#,
+            2 => r#"UPDATE `users` SET `email` = ? WHERE `id` = ?"#,
+            3 => r#"UPDATE `users` SET `created_at` = ?, `email` = ? WHERE `id` = ?"#,
+            4 => r#"UPDATE `users` SET `first_name` = ? WHERE `id` = ?"#,
+            5 => r#"UPDATE `users` SET `created_at` = ?, `first_name` = ? WHERE `id` = ?"#,
+            6 => r#"UPDATE `users` SET `email` = ?, `first_name` = ? WHERE `id` = ?"#,
+            7 => {
+                r#"UPDATE `users` SET `created_at` = ?, `email` = ?, `first_name` = ? WHERE `id` = ?"#
             }
+            8 => r#"UPDATE `users` SET `last_name` = ? WHERE `id` = ?"#,
+            9 => r#"UPDATE `users` SET `created_at` = ?, `last_name` = ? WHERE `id` = ?"#,
+            10 => r#"UPDATE `users` SET `email` = ?, `last_name` = ? WHERE `id` = ?"#,
+            11 => {
+                r#"UPDATE `users` SET `created_at` = ?, `email` = ?, `last_name` = ? WHERE `id` = ?"#
+            }
+            12 => r#"UPDATE `users` SET `first_name` = ?, `last_name` = ? WHERE `id` = ?"#,
+            13 => {
+                r#"UPDATE `users` SET `created_at` = ?, `first_name` = ?, `last_name` = ? WHERE `id` = ?"#
+            }
+            14 => {
+                r#"UPDATE `users` SET `email` = ?, `first_name` = ?, `last_name` = ? WHERE `id` = ?"#
+            }
+            15 => {
+                r#"UPDATE `users` SET `created_at` = ?, `email` = ?, `first_name` = ?, `last_name` = ? WHERE `id` = ?"#
+            }
+            16 => r#"UPDATE `users` SET `status` = ? WHERE `id` = ?"#,
+            17 => r#"UPDATE `users` SET `created_at` = ?, `status` = ? WHERE `id` = ?"#,
+            18 => r#"UPDATE `users` SET `email` = ?, `status` = ? WHERE `id` = ?"#,
+            19 => {
+                r#"UPDATE `users` SET `created_at` = ?, `email` = ?, `status` = ? WHERE `id` = ?"#
+            }
+            20 => r#"UPDATE `users` SET `first_name` = ?, `status` = ? WHERE `id` = ?"#,
+            21 => {
+                r#"UPDATE `users` SET `created_at` = ?, `first_name` = ?, `status` = ? WHERE `id` = ?"#
+            }
+            22 => {
+                r#"UPDATE `users` SET `email` = ?, `first_name` = ?, `status` = ? WHERE `id` = ?"#
+            }
+            23 => {
+                r#"UPDATE `users` SET `created_at` = ?, `email` = ?, `first_name` = ?, `status` = ? WHERE `id` = ?"#
+            }
+            24 => r#"UPDATE `users` SET `last_name` = ?, `status` = ? WHERE `id` = ?"#,
+            25 => {
+                r#"UPDATE `users` SET `created_at` = ?, `last_name` = ?, `status` = ? WHERE `id` = ?"#
+            }
+            26 => r#"UPDATE `users` SET `email` = ?, `last_name` = ?, `status` = ? WHERE `id` = ?"#,
+            27 => {
+                r#"UPDATE `users` SET `created_at` = ?, `email` = ?, `last_name` = ?, `status` = ? WHERE `id` = ?"#
+            }
+            28 => {
+                r#"UPDATE `users` SET `first_name` = ?, `last_name` = ?, `status` = ? WHERE `id` = ?"#
+            }
+            29 => {
+                r#"UPDATE `users` SET `created_at` = ?, `first_name` = ?, `last_name` = ?, `status` = ? WHERE `id` = ?"#
+            }
+            30 => {
+                r#"UPDATE `users` SET `email` = ?, `first_name` = ?, `last_name` = ?, `status` = ? WHERE `id` = ?"#
+            }
+            31 => {
+                r#"UPDATE `users` SET `created_at` = ?, `email` = ?, `first_name` = ?, `last_name` = ?, `status` = ? WHERE `id` = ?"#
+            }
+            _ => unreachable!(),
         };
 
-        let mut query = sqlx::query::<sqlx::MySql>(sqlx::AssertSqlSafe(query_str.as_str()));
+        let mut query = sqlx::query::<sqlx::MySql>(query_str);
         if let Some(val) = &patch.created_at {
             query = query.bind(val);
         }
@@ -443,9 +477,9 @@ impl Users {
 
     pub async fn get_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         executor: E,
-        email: &String,
+        email: &str,
     ) -> sqlx::Result<Option<Self>> {
-        let query = r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM users WHERE `email` = ?"#;
+        let query = r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM `users` WHERE `email` = ?"#;
         sqlx::query_as::<_, Self>(query)
             .bind(email)
             .fetch_optional(executor)
@@ -454,9 +488,9 @@ impl Users {
 
     pub async fn exists_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         executor: E,
-        email: &String,
+        email: &str,
     ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM users WHERE `email` = ? LIMIT 1"#;
+        let query = r#"SELECT 1 FROM `users` WHERE `email` = ? LIMIT 1"#;
         let exists: Option<(i32,)> = sqlx::query_as(query)
             .bind(email)
             .fetch_optional(executor)
@@ -466,9 +500,9 @@ impl Users {
 
     pub async fn delete_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         executor: E,
-        email: &String,
+        email: &str,
     ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM users WHERE `email` = ?"#;
+        let query = r#"DELETE FROM `users` WHERE `email` = ?"#;
         let result = sqlx::query::<sqlx::MySql>(query)
             .bind(email)
             .execute(executor)
@@ -481,11 +515,12 @@ impl Users {
         E: sqlx::Executor<'e, Database = sqlx::MySql>,
     >(
         executor: E,
-        last_name: &String,
-        first_name: &String,
+        last_name: &str,
+        first_name: &str,
         limit: i64,
     ) -> sqlx::Result<Vec<Self>> {
-        let query = r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM users WHERE `last_name` = ? AND `first_name` = ? ORDER BY `id` ASC LIMIT ?"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM `users` WHERE `last_name` = ? AND `first_name` = ? ORDER BY `id` ASC LIMIT ?"#;
         sqlx::query_as::<_, Self>(query)
             .bind(last_name)
             .bind(first_name)
@@ -502,11 +537,12 @@ impl Users {
         E: sqlx::Executor<'e, Database = sqlx::MySql> + 'e,
     >(
         executor: E,
-        last_name: &'e String,
-        first_name: &'e String,
+        last_name: &'e str,
+        first_name: &'e str,
         limit: i64,
     ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let query = r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM users WHERE `last_name` = ? AND `first_name` = ? ORDER BY `id` ASC LIMIT ?"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM `users` WHERE `last_name` = ? AND `first_name` = ? ORDER BY `id` ASC LIMIT ?"#;
         sqlx::query_as::<_, Self>(query)
             .bind(last_name)
             .bind(first_name)
@@ -519,10 +555,10 @@ impl Users {
         E: sqlx::Executor<'e, Database = sqlx::MySql>,
     >(
         executor: E,
-        last_name: &String,
-        first_name: &String,
+        last_name: &str,
+        first_name: &str,
     ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM users WHERE `last_name` = ? AND `first_name` = ? LIMIT 1"#;
+        let query = r#"SELECT 1 FROM `users` WHERE `last_name` = ? AND `first_name` = ? LIMIT 1"#;
         let exists: Option<(i32,)> = sqlx::query_as(query)
             .bind(last_name)
             .bind(first_name)
@@ -536,10 +572,10 @@ impl Users {
         E: sqlx::Executor<'e, Database = sqlx::MySql>,
     >(
         executor: E,
-        last_name: &String,
-        first_name: &String,
+        last_name: &str,
+        first_name: &str,
     ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM users WHERE `last_name` = ? AND `first_name` = ?"#;
+        let query = r#"DELETE FROM `users` WHERE `last_name` = ? AND `first_name` = ?"#;
         let result = sqlx::query::<sqlx::MySql>(query)
             .bind(last_name)
             .bind(first_name)

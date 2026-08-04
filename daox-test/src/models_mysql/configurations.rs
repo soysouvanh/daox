@@ -54,6 +54,16 @@ impl Configurations {
                 errors.push("r#match: exceeds max_length 255".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.r#match.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("r#match: format constraint not met".into());
+            }
+        }
         if let Some(v) = Some(&self.r#type) {
             if v.len() < 1 {
                 errors.push("r#type: min_length 1 not met".into());
@@ -64,9 +74,29 @@ impl Configurations {
                 errors.push("r#type: exceeds max_length 50".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.r#type) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("r#type: format constraint not met".into());
+            }
+        }
         if let Some(v) = self.value.as_ref() {
             if v.len() > 65535 {
                 errors.push("value: exceeds max_length 65535".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.value.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("value: format constraint not met".into());
             }
         }
         if errors.is_empty() {
@@ -86,7 +116,7 @@ impl Configurations {
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"SELECT COUNT(*) FROM configurations"#;
+        let query = r#"SELECT COUNT(*) FROM `configurations`"#;
         let (count,): (i64,) = sqlx::query_as(query).fetch_one(executor).await?;
         Ok(count as u64)
     }
@@ -108,7 +138,8 @@ impl Configurations {
         executor: E,
         limit: i64,
     ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let query = r#"SELECT `id`, `match`, `type`, `value` FROM configurations ORDER BY `id` ASC LIMIT ?"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT `id`, `match`, `type`, `value` FROM `configurations` ORDER BY `id` ASC LIMIT ?"#;
         sqlx::query_as::<_, Self>(query).bind(limit).fetch(executor)
     }
 
@@ -116,7 +147,7 @@ impl Configurations {
         executor: E,
         id: i32,
     ) -> sqlx::Result<Option<Self>> {
-        let query = r#"SELECT `id`, `match`, `type`, `value` FROM configurations WHERE `id` = ?"#;
+        let query = r#"SELECT `id`, `match`, `type`, `value` FROM `configurations` WHERE `id` = ?"#;
         sqlx::query_as::<_, Self>(query)
             .bind(id)
             .fetch_optional(executor)
@@ -127,7 +158,7 @@ impl Configurations {
         executor: E,
         id: i32,
     ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM configurations WHERE `id` = ? LIMIT 1"#;
+        let query = r#"SELECT 1 FROM `configurations` WHERE `id` = ? LIMIT 1"#;
         let exists: Option<(i32,)> = sqlx::query_as(query)
             .bind(id)
             .fetch_optional(executor)
@@ -140,7 +171,8 @@ impl Configurations {
         last_id: i32,
         limit: u32,
     ) -> sqlx::Result<Vec<Self>> {
-        let query = r#"SELECT `id`, `match`, `type`, `value` FROM configurations WHERE `id` > ? ORDER BY `id` ASC LIMIT ?"#;
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT `id`, `match`, `type`, `value` FROM `configurations` WHERE `id` > ? ORDER BY `id` ASC LIMIT ?"#;
         sqlx::query_as::<_, Self>(query)
             .bind(last_id)
             .bind(limit as i64)
@@ -152,7 +184,7 @@ impl Configurations {
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"INSERT INTO configurations (`match`, `type`, `value`) VALUES (?, ?, ?)"#;
+        let query = r#"INSERT INTO `configurations` (`match`, `type`, `value`) VALUES (?, ?, ?)"#;
         let result = sqlx::query::<sqlx::MySql>(query)
             .bind(&self.r#match)
             .bind(&self.r#type)
@@ -175,7 +207,7 @@ impl Configurations {
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
             let mut qb: sqlx::QueryBuilder<sqlx::MySql> = sqlx::QueryBuilder::new(
-                r#"INSERT INTO configurations (`match`, `type`, `value`) "#,
+                r#"INSERT INTO `configurations` (`match`, `type`, `value`) "#,
             );
             qb.push_values(chunk, |mut b, item| {
                 b.push_bind(&item.r#match);
@@ -192,7 +224,7 @@ impl Configurations {
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
-        let query = r#"INSERT INTO configurations (`match`, `type`, `value`) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE `match` = VALUES(`match`), `type` = VALUES(`type`), `value` = VALUES(`value`)"#;
+        let query = r#"INSERT INTO `configurations` (`match`, `type`, `value`) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE `match` = VALUES(`match`), `type` = VALUES(`type`), `value` = VALUES(`value`)"#;
         let result = sqlx::query::<sqlx::MySql>(query)
             .bind(&self.r#match)
             .bind(&self.r#type)
@@ -215,14 +247,14 @@ impl Configurations {
         let mut total_affected = 0;
         for chunk in items.chunks(chunk_size.max(1)) {
             let mut qb: sqlx::QueryBuilder<sqlx::MySql> = sqlx::QueryBuilder::new(
-                r#"INSERT INTO configurations (`match`, `type`, `value`) "#,
+                r#"INSERT INTO `configurations` (`match`, `type`, `value`) "#,
             );
             qb.push_values(chunk, |mut b, item| {
                 b.push_bind(&item.r#match);
                 b.push_bind(&item.r#type);
                 b.push_bind(&item.value);
             });
-            qb.push(" ON DUPLICATE KEY UPDATE `match` = VALUES(`match`), `type` = VALUES(`type`), `value` = VALUES(`value`)");
+            qb.push(r#" ON DUPLICATE KEY UPDATE `match` = VALUES(`match`), `type` = VALUES(`type`), `value` = VALUES(`value`)"#);
             let result = qb.build().execute(&mut **executor).await?;
             total_affected += result.rows_affected();
         }
@@ -234,7 +266,7 @@ impl Configurations {
         executor: E,
     ) -> sqlx::Result<u64> {
         let query_str =
-            r#"UPDATE configurations SET `match` = ?, `type` = ?, `value` = ? WHERE `id` = ?"#;
+            r#"UPDATE `configurations` SET `match` = ?, `type` = ?, `value` = ? WHERE `id` = ?"#;
         let mut query = sqlx::query::<sqlx::MySql>(query_str);
         query = query.bind(&self.r#match);
         query = query.bind(&self.r#type);
@@ -248,7 +280,7 @@ impl Configurations {
         executor: E,
         id: i32,
     ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM configurations WHERE `id` = ?"#;
+        let query = r#"DELETE FROM `configurations` WHERE `id` = ?"#;
         let result = sqlx::query::<sqlx::MySql>(query)
             .bind(id)
             .execute(executor)
@@ -267,7 +299,7 @@ impl Configurations {
         let chunk_size = 5000_usize.min(65535);
         for chunk in ids.chunks(chunk_size) {
             let mut qb: sqlx::QueryBuilder<sqlx::MySql> =
-                sqlx::QueryBuilder::new(r#"DELETE FROM configurations WHERE `id` IN "#);
+                sqlx::QueryBuilder::new(r#"DELETE FROM `configurations` WHERE `id` IN "#);
             qb.push("(");
             let mut sep = qb.separated(", ");
             for id in chunk {
@@ -286,83 +318,38 @@ impl Configurations {
         id: i32,
         patch: &ConfigurationsPatch,
     ) -> sqlx::Result<u64> {
-        let mut bits = [0u8; 1];
+        let mut mask = 0u64;
         let mut has = false;
         if patch.r#match.is_some() {
-            bits[0] |= 1 << 0;
+            mask |= 1 << 0;
             has = true;
         }
         if patch.r#type.is_some() {
-            bits[0] |= 1 << 1;
+            mask |= 1 << 1;
             has = true;
         }
         if patch.value.is_some() {
-            bits[0] |= 1 << 2;
+            mask |= 1 << 2;
             has = true;
         }
         if !has {
             return Ok(0);
         }
 
-        static CACHE: std::sync::OnceLock<
-            [std::sync::RwLock<std::collections::HashMap<[u8; 1], String>>; 16],
-        > = std::sync::OnceLock::new();
-        let cache_shards = CACHE.get_or_init(|| {
-            std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()))
-        });
-        let shard_idx = bits
-            .iter()
-            .fold(0usize, |acc, &b| acc.wrapping_add(b as usize) ^ (acc << 3))
-            % 16;
-        let cache_lock = &cache_shards[shard_idx];
-        let query_str = {
-            let read = cache_lock.read().unwrap();
-            if let Some(q) = read.get(&bits) {
-                q.clone()
-            } else {
-                drop(read);
-                let mut write = cache_lock.write().unwrap();
-                if let Some(q) = write.get(&bits) {
-                    q.clone()
-                } else {
-                    let mut q = String::with_capacity(352);
-                    q.push_str("UPDATE configurations SET ");
-                    let mut first = true;
-                    if patch.r#match.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`match` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    if patch.r#type.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`type` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    if patch.value.is_some() {
-                        if !first {
-                            q.push_str(", ");
-                        }
-                        q.push_str(r#"`value` = "#);
-                        q.push_str("?");
-                        first = false;
-                    }
-                    q.push_str(r#" WHERE `id` = "#);
-                    q.push_str("?");
-                    if write.len() < 1000 {
-                        write.insert(bits, q.clone());
-                    }
-                    q
-                }
+        let query_str = match mask {
+            1 => r#"UPDATE `configurations` SET `match` = ? WHERE `id` = ?"#,
+            2 => r#"UPDATE `configurations` SET `type` = ? WHERE `id` = ?"#,
+            3 => r#"UPDATE `configurations` SET `match` = ?, `type` = ? WHERE `id` = ?"#,
+            4 => r#"UPDATE `configurations` SET `value` = ? WHERE `id` = ?"#,
+            5 => r#"UPDATE `configurations` SET `match` = ?, `value` = ? WHERE `id` = ?"#,
+            6 => r#"UPDATE `configurations` SET `type` = ?, `value` = ? WHERE `id` = ?"#,
+            7 => {
+                r#"UPDATE `configurations` SET `match` = ?, `type` = ?, `value` = ? WHERE `id` = ?"#
             }
+            _ => unreachable!(),
         };
 
-        let mut query = sqlx::query::<sqlx::MySql>(sqlx::AssertSqlSafe(query_str.as_str()));
+        let mut query = sqlx::query::<sqlx::MySql>(query_str);
         if let Some(val) = &patch.r#match {
             query = query.bind(val);
         }
