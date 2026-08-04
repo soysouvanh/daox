@@ -4,6 +4,9 @@ pub mod models_mysql;
 pub mod models_pg;
 pub mod models_sqlite;
 
+#[cfg(test)]
+mod security_tests;
+
 use sqlx::mysql::MySqlPoolOptions;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::sqlite::SqlitePoolOptions;
