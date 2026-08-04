@@ -344,212 +344,55 @@ impl CompTypesMetadata {
         id: i64,
         patch: &CompTypesMetadataPatch,
     ) -> sqlx::Result<u64> {
-        let mut mask = 0u64;
-        let mut has = false;
+        let mut set_clauses: Vec<String> = Vec::new();
+        let mut _param_idx = 1usize;
         if patch.comp_types_id.is_some() {
-            mask |= 1 << 0;
-            has = true;
+            set_clauses.push("`comp_types_id` = ?".to_string());
+            _param_idx += 1;
         }
         if patch.f_blob.is_some() {
-            mask |= 1 << 1;
-            has = true;
+            set_clauses.push("`f_blob` = ?".to_string());
+            _param_idx += 1;
         }
         if patch.f_date.is_some() {
-            mask |= 1 << 2;
-            has = true;
+            set_clauses.push("`f_date` = ?".to_string());
+            _param_idx += 1;
         }
         if patch.f_datetime.is_some() {
-            mask |= 1 << 3;
-            has = true;
+            set_clauses.push("`f_datetime` = ?".to_string());
+            _param_idx += 1;
         }
         if patch.f_json.is_some() {
-            mask |= 1 << 4;
-            has = true;
+            set_clauses.push("`f_json` = ?".to_string());
+            _param_idx += 1;
         }
         if patch.f_timestamp.is_some() {
-            mask |= 1 << 5;
-            has = true;
+            set_clauses.push("`f_timestamp` = ?".to_string());
+            _param_idx += 1;
         }
-        if !has {
+        if set_clauses.is_empty() {
             return Ok(0);
         }
-
-        let query_str = match mask {
-            1 => r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ? WHERE `id` = ?"#,
-            2 => r#"UPDATE `comp_types_metadata` SET `f_blob` = ? WHERE `id` = ?"#,
-            3 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_blob` = ? WHERE `id` = ?"#
+        let mut query_str = format!(
+            "UPDATE `comp_types_metadata` SET {}",
+            set_clauses.join(", ")
+        );
+        query_str.push_str(" WHERE `id` = ?");
+        _param_idx += 1;
+        static CACHE: std::sync::OnceLock<
+            std::sync::RwLock<std::collections::HashMap<String, &'static str>>,
+        > = std::sync::OnceLock::new();
+        let cache = CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let safe_query_str: &'static str = {
+            if let Some(s) = cache.read().unwrap().get(&query_str) {
+                *s
+            } else {
+                let leaked = Box::leak(query_str.clone().into_boxed_str());
+                cache.write().unwrap().insert(query_str, leaked);
+                leaked
             }
-            4 => r#"UPDATE `comp_types_metadata` SET `f_date` = ? WHERE `id` = ?"#,
-            5 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_date` = ? WHERE `id` = ?"#
-            }
-            6 => r#"UPDATE `comp_types_metadata` SET `f_blob` = ?, `f_date` = ? WHERE `id` = ?"#,
-            7 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_blob` = ?, `f_date` = ? WHERE `id` = ?"#
-            }
-            8 => r#"UPDATE `comp_types_metadata` SET `f_datetime` = ? WHERE `id` = ?"#,
-            9 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_datetime` = ? WHERE `id` = ?"#
-            }
-            10 => {
-                r#"UPDATE `comp_types_metadata` SET `f_blob` = ?, `f_datetime` = ? WHERE `id` = ?"#
-            }
-            11 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_blob` = ?, `f_datetime` = ? WHERE `id` = ?"#
-            }
-            12 => {
-                r#"UPDATE `comp_types_metadata` SET `f_date` = ?, `f_datetime` = ? WHERE `id` = ?"#
-            }
-            13 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_date` = ?, `f_datetime` = ? WHERE `id` = ?"#
-            }
-            14 => {
-                r#"UPDATE `comp_types_metadata` SET `f_blob` = ?, `f_date` = ?, `f_datetime` = ? WHERE `id` = ?"#
-            }
-            15 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_blob` = ?, `f_date` = ?, `f_datetime` = ? WHERE `id` = ?"#
-            }
-            16 => r#"UPDATE `comp_types_metadata` SET `f_json` = ? WHERE `id` = ?"#,
-            17 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_json` = ? WHERE `id` = ?"#
-            }
-            18 => r#"UPDATE `comp_types_metadata` SET `f_blob` = ?, `f_json` = ? WHERE `id` = ?"#,
-            19 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_blob` = ?, `f_json` = ? WHERE `id` = ?"#
-            }
-            20 => r#"UPDATE `comp_types_metadata` SET `f_date` = ?, `f_json` = ? WHERE `id` = ?"#,
-            21 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_date` = ?, `f_json` = ? WHERE `id` = ?"#
-            }
-            22 => {
-                r#"UPDATE `comp_types_metadata` SET `f_blob` = ?, `f_date` = ?, `f_json` = ? WHERE `id` = ?"#
-            }
-            23 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_blob` = ?, `f_date` = ?, `f_json` = ? WHERE `id` = ?"#
-            }
-            24 => {
-                r#"UPDATE `comp_types_metadata` SET `f_datetime` = ?, `f_json` = ? WHERE `id` = ?"#
-            }
-            25 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_datetime` = ?, `f_json` = ? WHERE `id` = ?"#
-            }
-            26 => {
-                r#"UPDATE `comp_types_metadata` SET `f_blob` = ?, `f_datetime` = ?, `f_json` = ? WHERE `id` = ?"#
-            }
-            27 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_blob` = ?, `f_datetime` = ?, `f_json` = ? WHERE `id` = ?"#
-            }
-            28 => {
-                r#"UPDATE `comp_types_metadata` SET `f_date` = ?, `f_datetime` = ?, `f_json` = ? WHERE `id` = ?"#
-            }
-            29 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_date` = ?, `f_datetime` = ?, `f_json` = ? WHERE `id` = ?"#
-            }
-            30 => {
-                r#"UPDATE `comp_types_metadata` SET `f_blob` = ?, `f_date` = ?, `f_datetime` = ?, `f_json` = ? WHERE `id` = ?"#
-            }
-            31 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_blob` = ?, `f_date` = ?, `f_datetime` = ?, `f_json` = ? WHERE `id` = ?"#
-            }
-            32 => r#"UPDATE `comp_types_metadata` SET `f_timestamp` = ? WHERE `id` = ?"#,
-            33 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            34 => {
-                r#"UPDATE `comp_types_metadata` SET `f_blob` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            35 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_blob` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            36 => {
-                r#"UPDATE `comp_types_metadata` SET `f_date` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            37 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_date` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            38 => {
-                r#"UPDATE `comp_types_metadata` SET `f_blob` = ?, `f_date` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            39 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_blob` = ?, `f_date` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            40 => {
-                r#"UPDATE `comp_types_metadata` SET `f_datetime` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            41 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_datetime` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            42 => {
-                r#"UPDATE `comp_types_metadata` SET `f_blob` = ?, `f_datetime` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            43 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_blob` = ?, `f_datetime` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            44 => {
-                r#"UPDATE `comp_types_metadata` SET `f_date` = ?, `f_datetime` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            45 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_date` = ?, `f_datetime` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            46 => {
-                r#"UPDATE `comp_types_metadata` SET `f_blob` = ?, `f_date` = ?, `f_datetime` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            47 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_blob` = ?, `f_date` = ?, `f_datetime` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            48 => {
-                r#"UPDATE `comp_types_metadata` SET `f_json` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            49 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_json` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            50 => {
-                r#"UPDATE `comp_types_metadata` SET `f_blob` = ?, `f_json` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            51 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_blob` = ?, `f_json` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            52 => {
-                r#"UPDATE `comp_types_metadata` SET `f_date` = ?, `f_json` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            53 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_date` = ?, `f_json` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            54 => {
-                r#"UPDATE `comp_types_metadata` SET `f_blob` = ?, `f_date` = ?, `f_json` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            55 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_blob` = ?, `f_date` = ?, `f_json` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            56 => {
-                r#"UPDATE `comp_types_metadata` SET `f_datetime` = ?, `f_json` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            57 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_datetime` = ?, `f_json` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            58 => {
-                r#"UPDATE `comp_types_metadata` SET `f_blob` = ?, `f_datetime` = ?, `f_json` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            59 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_blob` = ?, `f_datetime` = ?, `f_json` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            60 => {
-                r#"UPDATE `comp_types_metadata` SET `f_date` = ?, `f_datetime` = ?, `f_json` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            61 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_date` = ?, `f_datetime` = ?, `f_json` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            62 => {
-                r#"UPDATE `comp_types_metadata` SET `f_blob` = ?, `f_date` = ?, `f_datetime` = ?, `f_json` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            63 => {
-                r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_blob` = ?, `f_date` = ?, `f_datetime` = ?, `f_json` = ?, `f_timestamp` = ? WHERE `id` = ?"#
-            }
-            _ => return Err(sqlx::Error::Protocol("invalid patch mask".into())),
         };
-
-        let mut query = sqlx::query::<sqlx::MySql>(query_str);
+        let mut query = sqlx::query::<sqlx::MySql>(safe_query_str);
         if let Some(val) = &patch.comp_types_id {
             query = query.bind(val);
         }

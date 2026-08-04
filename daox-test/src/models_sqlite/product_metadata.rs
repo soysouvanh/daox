@@ -39,14 +39,44 @@ impl ProductMetadata {
     #[allow(unused_comparisons)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.attributes.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("attributes: format constraint not met".into());
+            }
+        }
         if let Some(v) = Some(&self.category) {
             if v.len() < 1 {
                 errors.push("category: min_length 1 not met".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.category) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("category: format constraint not met".into());
+            }
+        }
         if let Some(v) = Some(&self.id) {
             if v.len() < 1 {
                 errors.push("id: min_length 1 not met".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.id) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("id: format constraint not met".into());
             }
         }
         if errors.is_empty() {
@@ -306,38 +336,40 @@ impl ProductMetadata {
         id: &str,
         patch: &ProductMetadataPatch,
     ) -> sqlx::Result<u64> {
-        let mut mask = 0u64;
-        let mut has = false;
+        let mut set_clauses: Vec<String> = Vec::new();
+        let mut _param_idx = 1usize;
         if patch.attributes.is_some() {
-            mask |= 1 << 0;
-            has = true;
+            set_clauses.push("`attributes` = ?".to_string());
+            _param_idx += 1;
         }
         if patch.category.is_some() {
-            mask |= 1 << 1;
-            has = true;
+            set_clauses.push("`category` = ?".to_string());
+            _param_idx += 1;
         }
         if patch.raw_data.is_some() {
-            mask |= 1 << 2;
-            has = true;
+            set_clauses.push("`raw_data` = ?".to_string());
+            _param_idx += 1;
         }
-        if !has {
+        if set_clauses.is_empty() {
             return Ok(0);
         }
-
-        let query_str = match mask {
-            1 => r#"UPDATE `product_metadata` SET `attributes` = ? WHERE `id` = ?"#,
-            2 => r#"UPDATE `product_metadata` SET `category` = ? WHERE `id` = ?"#,
-            3 => r#"UPDATE `product_metadata` SET `attributes` = ?, `category` = ? WHERE `id` = ?"#,
-            4 => r#"UPDATE `product_metadata` SET `raw_data` = ? WHERE `id` = ?"#,
-            5 => r#"UPDATE `product_metadata` SET `attributes` = ?, `raw_data` = ? WHERE `id` = ?"#,
-            6 => r#"UPDATE `product_metadata` SET `category` = ?, `raw_data` = ? WHERE `id` = ?"#,
-            7 => {
-                r#"UPDATE `product_metadata` SET `attributes` = ?, `category` = ?, `raw_data` = ? WHERE `id` = ?"#
+        let mut query_str = format!("UPDATE `product_metadata` SET {}", set_clauses.join(", "));
+        query_str.push_str(" WHERE `id` = ?");
+        _param_idx += 1;
+        static CACHE: std::sync::OnceLock<
+            std::sync::RwLock<std::collections::HashMap<String, &'static str>>,
+        > = std::sync::OnceLock::new();
+        let cache = CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let safe_query_str: &'static str = {
+            if let Some(s) = cache.read().unwrap().get(&query_str) {
+                *s
+            } else {
+                let leaked = Box::leak(query_str.clone().into_boxed_str());
+                cache.write().unwrap().insert(query_str, leaked);
+                leaked
             }
-            _ => return Err(sqlx::Error::Protocol("invalid patch mask".into())),
         };
-
-        let mut query = sqlx::query::<sqlx::Sqlite>(query_str);
+        let mut query = sqlx::query::<sqlx::Sqlite>(safe_query_str);
         if let Some(val) = &patch.attributes {
             query = query.bind(val);
         }

@@ -44,6 +44,16 @@ impl UserRoles {
                 errors.push("role_name: exceeds max_length 50".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.role_name) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("role_name: format constraint not met".into());
+            }
+        }
         if let Some(v) = Some(&self.user_id) {
             if (*v as i64) < 0 {
                 errors.push("user_id: minimum value '0' not met".into());
@@ -176,8 +186,18 @@ impl UserRoles {
                     write!(&mut payload, "{}", v).unwrap();
                 }
                 payload.push('\n');
+                if payload.len() > 10 * 1024 * 1024 {
+                    {
+                        copy_in.send(payload.as_bytes()).await?;
+                        payload.clear();
+                    }
+                }
             }
-            copy_in.send(payload.as_bytes()).await?;
+            if !payload.is_empty() {
+                {
+                    copy_in.send(payload.as_bytes()).await?;
+                }
+            }
         }
         copy_in.finish().await?;
         Ok(items.len() as u64)

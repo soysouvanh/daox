@@ -27,7 +27,7 @@ message = "schema.min_length.message|1"
 # message = 
 
 [format]
-value = ""
+value = "^[0-9]{1,16}$"
 message = "schema.format.message"
 
 [is_primary_key]

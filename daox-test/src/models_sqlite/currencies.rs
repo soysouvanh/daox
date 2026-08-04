@@ -34,9 +34,29 @@ impl Currencies {
                 errors.push("code: min_length 1 not met".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.code) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("code: format constraint not met".into());
+            }
+        }
         if let Some(v) = Some(&self.name) {
             if v.len() < 1 {
                 errors.push("name: min_length 1 not met".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.name) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("name: format constraint not met".into());
             }
         }
         if errors.is_empty() {
@@ -284,22 +304,32 @@ impl Currencies {
         code: &str,
         patch: &CurrenciesPatch,
     ) -> sqlx::Result<u64> {
-        let mut mask = 0u64;
-        let mut has = false;
+        let mut set_clauses: Vec<String> = Vec::new();
+        let mut _param_idx = 1usize;
         if patch.name.is_some() {
-            mask |= 1 << 0;
-            has = true;
+            set_clauses.push("`name` = ?".to_string());
+            _param_idx += 1;
         }
-        if !has {
+        if set_clauses.is_empty() {
             return Ok(0);
         }
-
-        let query_str = match mask {
-            1 => r#"UPDATE `currencies` SET `name` = ? WHERE `code` = ?"#,
-            _ => return Err(sqlx::Error::Protocol("invalid patch mask".into())),
+        let mut query_str = format!("UPDATE `currencies` SET {}", set_clauses.join(", "));
+        query_str.push_str(" WHERE `code` = ?");
+        _param_idx += 1;
+        static CACHE: std::sync::OnceLock<
+            std::sync::RwLock<std::collections::HashMap<String, &'static str>>,
+        > = std::sync::OnceLock::new();
+        let cache = CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let safe_query_str: &'static str = {
+            if let Some(s) = cache.read().unwrap().get(&query_str) {
+                *s
+            } else {
+                let leaked = Box::leak(query_str.clone().into_boxed_str());
+                cache.write().unwrap().insert(query_str, leaked);
+                leaked
+            }
         };
-
-        let mut query = sqlx::query::<sqlx::Sqlite>(query_str);
+        let mut query = sqlx::query::<sqlx::Sqlite>(safe_query_str);
         if let Some(val) = &patch.name {
             query = query.bind(val);
         }

@@ -49,6 +49,16 @@ impl CompTypesActiveView {
                 errors.push("f_int: maximum value '2147483647' exceeded".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.f_varchar.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("f_varchar: format constraint not met".into());
+            }
+        }
         if let Some(v) = self.id.as_ref() {
             if (*v as i64) < 0 {
                 errors.push("id: minimum value '0' not met".into());

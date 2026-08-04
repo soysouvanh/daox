@@ -305,24 +305,34 @@ impl OrderItems {
         product_id: i64,
         patch: &OrderItemsPatch,
     ) -> sqlx::Result<u64> {
-        let mut mask = 0u64;
-        let mut has = false;
+        let mut set_clauses: Vec<String> = Vec::new();
+        let mut _param_idx = 1usize;
         if patch.quantity.is_some() {
-            mask |= 1 << 0;
-            has = true;
+            set_clauses.push("`quantity` = ?".to_string());
+            _param_idx += 1;
         }
-        if !has {
+        if set_clauses.is_empty() {
             return Ok(0);
         }
-
-        let query_str = match mask {
-            1 => {
-                r#"UPDATE `order_items` SET `quantity` = ? WHERE `order_id` = ? AND `product_id` = ?"#
+        let mut query_str = format!("UPDATE `order_items` SET {}", set_clauses.join(", "));
+        query_str.push_str(" WHERE `order_id` = ?");
+        _param_idx += 1;
+        query_str.push_str(" AND `product_id` = ?");
+        _param_idx += 1;
+        static CACHE: std::sync::OnceLock<
+            std::sync::RwLock<std::collections::HashMap<String, &'static str>>,
+        > = std::sync::OnceLock::new();
+        let cache = CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let safe_query_str: &'static str = {
+            if let Some(s) = cache.read().unwrap().get(&query_str) {
+                *s
+            } else {
+                let leaked = Box::leak(query_str.clone().into_boxed_str());
+                cache.write().unwrap().insert(query_str, leaked);
+                leaked
             }
-            _ => return Err(sqlx::Error::Protocol("invalid patch mask".into())),
         };
-
-        let mut query = sqlx::query::<sqlx::MySql>(query_str);
+        let mut query = sqlx::query::<sqlx::MySql>(safe_query_str);
         if let Some(val) = &patch.quantity {
             query = query.bind(val);
         }

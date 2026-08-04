@@ -1,4 +1,4 @@
 fn main() {
-    let s = "he\nllo\"world";
-    println!("description = {}", toml::to_string(s).unwrap());
+    let r = r#"^([a-zA-Z0-9_\-\.]+)@([a-zA-Z0-9_\-\.]+)\.([a-zA-Z]{2,5})$"#.to_string();
+    println!("Res Debug: {:?}", r);
 }

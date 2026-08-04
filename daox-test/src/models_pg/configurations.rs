@@ -54,6 +54,16 @@ impl Configurations {
                 errors.push("r#match: exceeds max_length 255".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.r#match.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("r#match: format constraint not met".into());
+            }
+        }
         if let Some(v) = Some(&self.r#type) {
             if v.len() < 1 {
                 errors.push("r#type: min_length 1 not met".into());
@@ -62,6 +72,26 @@ impl Configurations {
         if let Some(v) = Some(&self.r#type) {
             if v.len() > 50 {
                 errors.push("r#type: exceeds max_length 50".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.r#type) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("r#type: format constraint not met".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.value.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("value: format constraint not met".into());
             }
         }
         if errors.is_empty() {
@@ -243,8 +273,18 @@ impl Configurations {
                     payload.push('"');
                 }
                 payload.push('\n');
+                if payload.len() > 10 * 1024 * 1024 {
+                    {
+                        copy_in.send(payload.as_bytes()).await?;
+                        payload.clear();
+                    }
+                }
             }
-            copy_in.send(payload.as_bytes()).await?;
+            if !payload.is_empty() {
+                {
+                    copy_in.send(payload.as_bytes()).await?;
+                }
+            }
         }
         copy_in.finish().await?;
         Ok(items.len() as u64)
@@ -363,38 +403,40 @@ impl Configurations {
         id: i32,
         patch: &ConfigurationsPatch,
     ) -> sqlx::Result<u64> {
-        let mut mask = 0u64;
-        let mut has = false;
+        let mut set_clauses: Vec<String> = Vec::new();
+        let mut _param_idx = 1usize;
         if patch.r#match.is_some() {
-            mask |= 1 << 0;
-            has = true;
+            set_clauses.push(format!("\"match\" = ${}", _param_idx));
+            _param_idx += 1;
         }
         if patch.r#type.is_some() {
-            mask |= 1 << 1;
-            has = true;
+            set_clauses.push(format!("\"type\" = ${}", _param_idx));
+            _param_idx += 1;
         }
         if patch.value.is_some() {
-            mask |= 1 << 2;
-            has = true;
+            set_clauses.push(format!("\"value\" = ${}", _param_idx));
+            _param_idx += 1;
         }
-        if !has {
+        if set_clauses.is_empty() {
             return Ok(0);
         }
-
-        let query_str = match mask {
-            1 => r#"UPDATE "configurations" SET "match" = $1 WHERE "id" = $2"#,
-            2 => r#"UPDATE "configurations" SET "type" = $1 WHERE "id" = $2"#,
-            3 => r#"UPDATE "configurations" SET "match" = $1, "type" = $2 WHERE "id" = $3"#,
-            4 => r#"UPDATE "configurations" SET "value" = $1 WHERE "id" = $2"#,
-            5 => r#"UPDATE "configurations" SET "match" = $1, "value" = $2 WHERE "id" = $3"#,
-            6 => r#"UPDATE "configurations" SET "type" = $1, "value" = $2 WHERE "id" = $3"#,
-            7 => {
-                r#"UPDATE "configurations" SET "match" = $1, "type" = $2, "value" = $3 WHERE "id" = $4"#
+        let mut query_str = format!("UPDATE \"configurations\" SET {}", set_clauses.join(", "));
+        query_str.push_str(&format!(" WHERE \"id\" = ${}", _param_idx));
+        _param_idx += 1;
+        static CACHE: std::sync::OnceLock<
+            std::sync::RwLock<std::collections::HashMap<String, &'static str>>,
+        > = std::sync::OnceLock::new();
+        let cache = CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let safe_query_str: &'static str = {
+            if let Some(s) = cache.read().unwrap().get(&query_str) {
+                *s
+            } else {
+                let leaked = Box::leak(query_str.clone().into_boxed_str());
+                cache.write().unwrap().insert(query_str, leaked);
+                leaked
             }
-            _ => return Err(sqlx::Error::Protocol("invalid patch mask".into())),
         };
-
-        let mut query = sqlx::query::<sqlx::Postgres>(query_str);
+        let mut query = sqlx::query::<sqlx::Postgres>(safe_query_str);
         if let Some(val) = &patch.r#match {
             query = query.bind(val);
         }

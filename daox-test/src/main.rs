@@ -27,8 +27,7 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
     use futures::StreamExt;
     use models_pg::{OrderItems, Users};
 
-    let pg_url = env::var("DATABASE_URL_PG")
-        .unwrap_or_else(|_| "postgres://user:password@localhost:5433/daox_test".into());
+    let pg_url = env::var("DATABASE_URL_PG").expect("DATABASE_URL_PG must be set");
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(&pg_url)
@@ -255,8 +254,7 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
     use futures::StreamExt;
     use models_mysql::{OrderItems, Users};
 
-    let mysql_url = env::var("DATABASE_URL_MYSQL")
-        .unwrap_or_else(|_| "mysql://user:password@localhost:3307/daox_test".into());
+    let mysql_url = env::var("DATABASE_URL_MYSQL").expect("DATABASE_URL_MYSQL must be set");
     let pool = MySqlPoolOptions::new()
         .max_connections(5)
         .connect(&mysql_url)

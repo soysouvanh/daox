@@ -39,6 +39,16 @@ impl UserRoles {
                 errors.push("role_name: min_length 1 not met".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.role_name) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("role_name: format constraint not met".into());
+            }
+        }
         if let Some(v) = Some(&self.user_id) {
             if (*v as i64) < 0 {
                 errors.push("user_id: minimum value '0' not met".into());
@@ -153,56 +163,6 @@ impl UserRoles {
         Ok(total_affected)
     }
 
-    pub async fn get_by_user_id_and_role_name<
-        'e,
-        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
-    >(
-        executor: E,
-        user_id: i64,
-        role_name: &str,
-    ) -> sqlx::Result<Option<Self>> {
-        let query = r#"SELECT `assigned_at`, `role_name`, `user_id` FROM `user_roles` WHERE `user_id` = ? AND `role_name` = ?"#;
-        sqlx::query_as::<_, Self>(query)
-            .bind(user_id)
-            .bind(role_name)
-            .fetch_optional(executor)
-            .await
-    }
-
-    pub async fn exists_by_user_id_and_role_name<
-        'e,
-        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
-    >(
-        executor: E,
-        user_id: i64,
-        role_name: &str,
-    ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM `user_roles` WHERE `user_id` = ? AND `role_name` = ? LIMIT 1"#;
-        let exists: Option<(i32,)> = sqlx::query_as(query)
-            .bind(user_id)
-            .bind(role_name)
-            .fetch_optional(executor)
-            .await?;
-        Ok(exists.is_some())
-    }
-
-    pub async fn delete_by_user_id_and_role_name<
-        'e,
-        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
-    >(
-        executor: E,
-        user_id: i64,
-        role_name: &str,
-    ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM `user_roles` WHERE `user_id` = ? AND `role_name` = ?"#;
-        let result = sqlx::query::<sqlx::Sqlite>(query)
-            .bind(user_id)
-            .bind(role_name)
-            .execute(executor)
-            .await?;
-        Ok(result.rows_affected())
-    }
-
     pub async fn list_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         executor: E,
         user_id: i64,
@@ -256,6 +216,56 @@ impl UserRoles {
         let query = r#"DELETE FROM `user_roles` WHERE `user_id` = ?"#;
         let result = sqlx::query::<sqlx::Sqlite>(query)
             .bind(user_id)
+            .execute(executor)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn get_by_user_id_and_role_name<
+        'e,
+        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    >(
+        executor: E,
+        user_id: i64,
+        role_name: &str,
+    ) -> sqlx::Result<Option<Self>> {
+        let query = r#"SELECT `assigned_at`, `role_name`, `user_id` FROM `user_roles` WHERE `user_id` = ? AND `role_name` = ?"#;
+        sqlx::query_as::<_, Self>(query)
+            .bind(user_id)
+            .bind(role_name)
+            .fetch_optional(executor)
+            .await
+    }
+
+    pub async fn exists_by_user_id_and_role_name<
+        'e,
+        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    >(
+        executor: E,
+        user_id: i64,
+        role_name: &str,
+    ) -> sqlx::Result<bool> {
+        let query = r#"SELECT 1 FROM `user_roles` WHERE `user_id` = ? AND `role_name` = ? LIMIT 1"#;
+        let exists: Option<(i32,)> = sqlx::query_as(query)
+            .bind(user_id)
+            .bind(role_name)
+            .fetch_optional(executor)
+            .await?;
+        Ok(exists.is_some())
+    }
+
+    pub async fn delete_by_user_id_and_role_name<
+        'e,
+        E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    >(
+        executor: E,
+        user_id: i64,
+        role_name: &str,
+    ) -> sqlx::Result<u64> {
+        let query = r#"DELETE FROM `user_roles` WHERE `user_id` = ? AND `role_name` = ?"#;
+        let result = sqlx::query::<sqlx::Sqlite>(query)
+            .bind(user_id)
+            .bind(role_name)
             .execute(executor)
             .await?;
         Ok(result.rows_affected())

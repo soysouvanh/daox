@@ -7,7 +7,7 @@ value = false
 message = "schema.is_optional.message"
 
 [enum_values]
-value = ["", "", ""]
+value = ["tech", "food", "books"]
 message = "schema.enum_values.message"
 
 [max_length]
@@ -27,7 +27,7 @@ message = "schema.min_length.message|1"
 # message = 
 
 [format]
-value = ""
+value = "^(tech|food|books)$"
 message = "schema.format.message"
 
 [is_primary_key]

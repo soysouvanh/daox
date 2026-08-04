@@ -59,9 +59,30 @@ impl Users {
                 errors.push("email: exceeds max_length 255".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.email) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$")
+                    .expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("email: format constraint not met".into());
+            }
+        }
         if let Some(v) = self.first_name.as_ref() {
             if v.len() > 100 {
                 errors.push("first_name: exceeds max_length 100".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.first_name.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("first_name: format constraint not met".into());
             }
         }
         if let Some(v) = Some(&self.id) {
@@ -84,6 +105,16 @@ impl Users {
                 errors.push("last_name: exceeds max_length 100".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.last_name) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("last_name: format constraint not met".into());
+            }
+        }
         if let Some(v) = Some(&self.status) {
             if v.len() < 1 {
                 errors.push("status: min_length 1 not met".into());
@@ -92,6 +123,16 @@ impl Users {
         if let Some(v) = Some(&self.status) {
             if v.len() > 50 {
                 errors.push("status: exceeds max_length 50".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.status) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("status: format constraint not met".into());
             }
         }
         if errors.is_empty() {
@@ -290,8 +331,18 @@ impl Users {
                     payload.push('"');
                 }
                 payload.push('\n');
+                if payload.len() > 10 * 1024 * 1024 {
+                    {
+                        copy_in.send(payload.as_bytes()).await?;
+                        payload.clear();
+                    }
+                }
             }
-            copy_in.send(payload.as_bytes()).await?;
+            if !payload.is_empty() {
+                {
+                    copy_in.send(payload.as_bytes()).await?;
+                }
+            }
         }
         copy_in.finish().await?;
         Ok(items.len() as u64)
@@ -416,100 +467,48 @@ impl Users {
         id: i64,
         patch: &UsersPatch,
     ) -> sqlx::Result<u64> {
-        let mut mask = 0u64;
-        let mut has = false;
+        let mut set_clauses: Vec<String> = Vec::new();
+        let mut _param_idx = 1usize;
         if patch.created_at.is_some() {
-            mask |= 1 << 0;
-            has = true;
+            set_clauses.push(format!("\"created_at\" = ${}", _param_idx));
+            _param_idx += 1;
         }
         if patch.email.is_some() {
-            mask |= 1 << 1;
-            has = true;
+            set_clauses.push(format!("\"email\" = ${}", _param_idx));
+            _param_idx += 1;
         }
         if patch.first_name.is_some() {
-            mask |= 1 << 2;
-            has = true;
+            set_clauses.push(format!("\"first_name\" = ${}", _param_idx));
+            _param_idx += 1;
         }
         if patch.last_name.is_some() {
-            mask |= 1 << 3;
-            has = true;
+            set_clauses.push(format!("\"last_name\" = ${}", _param_idx));
+            _param_idx += 1;
         }
         if patch.status.is_some() {
-            mask |= 1 << 4;
-            has = true;
+            set_clauses.push(format!("\"status\" = ${}", _param_idx));
+            _param_idx += 1;
         }
-        if !has {
+        if set_clauses.is_empty() {
             return Ok(0);
         }
-
-        let query_str = match mask {
-            1 => r#"UPDATE "users" SET "created_at" = $1 WHERE "id" = $2"#,
-            2 => r#"UPDATE "users" SET "email" = $1 WHERE "id" = $2"#,
-            3 => r#"UPDATE "users" SET "created_at" = $1, "email" = $2 WHERE "id" = $3"#,
-            4 => r#"UPDATE "users" SET "first_name" = $1 WHERE "id" = $2"#,
-            5 => r#"UPDATE "users" SET "created_at" = $1, "first_name" = $2 WHERE "id" = $3"#,
-            6 => r#"UPDATE "users" SET "email" = $1, "first_name" = $2 WHERE "id" = $3"#,
-            7 => {
-                r#"UPDATE "users" SET "created_at" = $1, "email" = $2, "first_name" = $3 WHERE "id" = $4"#
+        let mut query_str = format!("UPDATE \"users\" SET {}", set_clauses.join(", "));
+        query_str.push_str(&format!(" WHERE \"id\" = ${}", _param_idx));
+        _param_idx += 1;
+        static CACHE: std::sync::OnceLock<
+            std::sync::RwLock<std::collections::HashMap<String, &'static str>>,
+        > = std::sync::OnceLock::new();
+        let cache = CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let safe_query_str: &'static str = {
+            if let Some(s) = cache.read().unwrap().get(&query_str) {
+                *s
+            } else {
+                let leaked = Box::leak(query_str.clone().into_boxed_str());
+                cache.write().unwrap().insert(query_str, leaked);
+                leaked
             }
-            8 => r#"UPDATE "users" SET "last_name" = $1 WHERE "id" = $2"#,
-            9 => r#"UPDATE "users" SET "created_at" = $1, "last_name" = $2 WHERE "id" = $3"#,
-            10 => r#"UPDATE "users" SET "email" = $1, "last_name" = $2 WHERE "id" = $3"#,
-            11 => {
-                r#"UPDATE "users" SET "created_at" = $1, "email" = $2, "last_name" = $3 WHERE "id" = $4"#
-            }
-            12 => r#"UPDATE "users" SET "first_name" = $1, "last_name" = $2 WHERE "id" = $3"#,
-            13 => {
-                r#"UPDATE "users" SET "created_at" = $1, "first_name" = $2, "last_name" = $3 WHERE "id" = $4"#
-            }
-            14 => {
-                r#"UPDATE "users" SET "email" = $1, "first_name" = $2, "last_name" = $3 WHERE "id" = $4"#
-            }
-            15 => {
-                r#"UPDATE "users" SET "created_at" = $1, "email" = $2, "first_name" = $3, "last_name" = $4 WHERE "id" = $5"#
-            }
-            16 => r#"UPDATE "users" SET "status" = $1 WHERE "id" = $2"#,
-            17 => r#"UPDATE "users" SET "created_at" = $1, "status" = $2 WHERE "id" = $3"#,
-            18 => r#"UPDATE "users" SET "email" = $1, "status" = $2 WHERE "id" = $3"#,
-            19 => {
-                r#"UPDATE "users" SET "created_at" = $1, "email" = $2, "status" = $3 WHERE "id" = $4"#
-            }
-            20 => r#"UPDATE "users" SET "first_name" = $1, "status" = $2 WHERE "id" = $3"#,
-            21 => {
-                r#"UPDATE "users" SET "created_at" = $1, "first_name" = $2, "status" = $3 WHERE "id" = $4"#
-            }
-            22 => {
-                r#"UPDATE "users" SET "email" = $1, "first_name" = $2, "status" = $3 WHERE "id" = $4"#
-            }
-            23 => {
-                r#"UPDATE "users" SET "created_at" = $1, "email" = $2, "first_name" = $3, "status" = $4 WHERE "id" = $5"#
-            }
-            24 => r#"UPDATE "users" SET "last_name" = $1, "status" = $2 WHERE "id" = $3"#,
-            25 => {
-                r#"UPDATE "users" SET "created_at" = $1, "last_name" = $2, "status" = $3 WHERE "id" = $4"#
-            }
-            26 => {
-                r#"UPDATE "users" SET "email" = $1, "last_name" = $2, "status" = $3 WHERE "id" = $4"#
-            }
-            27 => {
-                r#"UPDATE "users" SET "created_at" = $1, "email" = $2, "last_name" = $3, "status" = $4 WHERE "id" = $5"#
-            }
-            28 => {
-                r#"UPDATE "users" SET "first_name" = $1, "last_name" = $2, "status" = $3 WHERE "id" = $4"#
-            }
-            29 => {
-                r#"UPDATE "users" SET "created_at" = $1, "first_name" = $2, "last_name" = $3, "status" = $4 WHERE "id" = $5"#
-            }
-            30 => {
-                r#"UPDATE "users" SET "email" = $1, "first_name" = $2, "last_name" = $3, "status" = $4 WHERE "id" = $5"#
-            }
-            31 => {
-                r#"UPDATE "users" SET "created_at" = $1, "email" = $2, "first_name" = $3, "last_name" = $4, "status" = $5 WHERE "id" = $6"#
-            }
-            _ => return Err(sqlx::Error::Protocol("invalid patch mask".into())),
         };
-
-        let mut query = sqlx::query::<sqlx::Postgres>(query_str);
+        let mut query = sqlx::query::<sqlx::Postgres>(safe_query_str);
         if let Some(val) = &patch.created_at {
             query = query.bind(val);
         }
@@ -527,41 +526,6 @@ impl Users {
         }
         query = query.bind(id);
         let result = query.execute(executor).await?;
-        Ok(result.rows_affected())
-    }
-
-    pub async fn get_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
-        executor: E,
-        email: &str,
-    ) -> sqlx::Result<Option<Self>> {
-        let query = r#"SELECT "created_at", "email", "first_name", "id", "last_name", "status" FROM "users" WHERE "email" = $1"#;
-        sqlx::query_as::<_, Self>(query)
-            .bind(email)
-            .fetch_optional(executor)
-            .await
-    }
-
-    pub async fn exists_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
-        executor: E,
-        email: &str,
-    ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM "users" WHERE "email" = $1 LIMIT 1"#;
-        let exists: Option<(i32,)> = sqlx::query_as(query)
-            .bind(email)
-            .fetch_optional(executor)
-            .await?;
-        Ok(exists.is_some())
-    }
-
-    pub async fn delete_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
-        executor: E,
-        email: &str,
-    ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM "users" WHERE "email" = $1"#;
-        let result = sqlx::query::<sqlx::Postgres>(query)
-            .bind(email)
-            .execute(executor)
-            .await?;
         Ok(result.rows_affected())
     }
 
@@ -638,6 +602,41 @@ impl Users {
         let result = sqlx::query::<sqlx::Postgres>(query)
             .bind(first_name)
             .bind(last_name)
+            .execute(executor)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn get_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+        executor: E,
+        email: &str,
+    ) -> sqlx::Result<Option<Self>> {
+        let query = r#"SELECT "created_at", "email", "first_name", "id", "last_name", "status" FROM "users" WHERE "email" = $1"#;
+        sqlx::query_as::<_, Self>(query)
+            .bind(email)
+            .fetch_optional(executor)
+            .await
+    }
+
+    pub async fn exists_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+        executor: E,
+        email: &str,
+    ) -> sqlx::Result<bool> {
+        let query = r#"SELECT 1 FROM "users" WHERE "email" = $1 LIMIT 1"#;
+        let exists: Option<(i32,)> = sqlx::query_as(query)
+            .bind(email)
+            .fetch_optional(executor)
+            .await?;
+        Ok(exists.is_some())
+    }
+
+    pub async fn delete_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+        executor: E,
+        email: &str,
+    ) -> sqlx::Result<u64> {
+        let query = r#"DELETE FROM "users" WHERE "email" = $1"#;
+        let result = sqlx::query::<sqlx::Postgres>(query)
+            .bind(email)
             .execute(executor)
             .await?;
         Ok(result.rows_affected())

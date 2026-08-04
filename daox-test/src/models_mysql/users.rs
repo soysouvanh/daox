@@ -59,9 +59,30 @@ impl Users {
                 errors.push("email: exceeds max_length 255".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.email) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$")
+                    .expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("email: format constraint not met".into());
+            }
+        }
         if let Some(v) = self.first_name.as_ref() {
             if v.len() > 100 {
                 errors.push("first_name: exceeds max_length 100".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.first_name.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("first_name: format constraint not met".into());
             }
         }
         if let Some(v) = Some(&self.id) {
@@ -84,6 +105,16 @@ impl Users {
                 errors.push("last_name: exceeds max_length 100".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.last_name) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("last_name: format constraint not met".into());
+            }
+        }
         if let Some(v) = Some(&self.status) {
             if v.len() < 1 {
                 errors.push("status: min_length 1 not met".into());
@@ -92,6 +123,16 @@ impl Users {
         if let Some(v) = Some(&self.status) {
             if v.len() > 50 {
                 errors.push("status: exceeds max_length 50".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = Some(&self.status) {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("status: format constraint not met".into());
             }
         }
         if errors.is_empty() {
@@ -354,98 +395,48 @@ impl Users {
         id: i64,
         patch: &UsersPatch,
     ) -> sqlx::Result<u64> {
-        let mut mask = 0u64;
-        let mut has = false;
+        let mut set_clauses: Vec<String> = Vec::new();
+        let mut _param_idx = 1usize;
         if patch.created_at.is_some() {
-            mask |= 1 << 0;
-            has = true;
+            set_clauses.push("`created_at` = ?".to_string());
+            _param_idx += 1;
         }
         if patch.email.is_some() {
-            mask |= 1 << 1;
-            has = true;
+            set_clauses.push("`email` = ?".to_string());
+            _param_idx += 1;
         }
         if patch.first_name.is_some() {
-            mask |= 1 << 2;
-            has = true;
+            set_clauses.push("`first_name` = ?".to_string());
+            _param_idx += 1;
         }
         if patch.last_name.is_some() {
-            mask |= 1 << 3;
-            has = true;
+            set_clauses.push("`last_name` = ?".to_string());
+            _param_idx += 1;
         }
         if patch.status.is_some() {
-            mask |= 1 << 4;
-            has = true;
+            set_clauses.push("`status` = ?".to_string());
+            _param_idx += 1;
         }
-        if !has {
+        if set_clauses.is_empty() {
             return Ok(0);
         }
-
-        let query_str = match mask {
-            1 => r#"UPDATE `users` SET `created_at` = ? WHERE `id` = ?"#,
-            2 => r#"UPDATE `users` SET `email` = ? WHERE `id` = ?"#,
-            3 => r#"UPDATE `users` SET `created_at` = ?, `email` = ? WHERE `id` = ?"#,
-            4 => r#"UPDATE `users` SET `first_name` = ? WHERE `id` = ?"#,
-            5 => r#"UPDATE `users` SET `created_at` = ?, `first_name` = ? WHERE `id` = ?"#,
-            6 => r#"UPDATE `users` SET `email` = ?, `first_name` = ? WHERE `id` = ?"#,
-            7 => {
-                r#"UPDATE `users` SET `created_at` = ?, `email` = ?, `first_name` = ? WHERE `id` = ?"#
+        let mut query_str = format!("UPDATE `users` SET {}", set_clauses.join(", "));
+        query_str.push_str(" WHERE `id` = ?");
+        _param_idx += 1;
+        static CACHE: std::sync::OnceLock<
+            std::sync::RwLock<std::collections::HashMap<String, &'static str>>,
+        > = std::sync::OnceLock::new();
+        let cache = CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let safe_query_str: &'static str = {
+            if let Some(s) = cache.read().unwrap().get(&query_str) {
+                *s
+            } else {
+                let leaked = Box::leak(query_str.clone().into_boxed_str());
+                cache.write().unwrap().insert(query_str, leaked);
+                leaked
             }
-            8 => r#"UPDATE `users` SET `last_name` = ? WHERE `id` = ?"#,
-            9 => r#"UPDATE `users` SET `created_at` = ?, `last_name` = ? WHERE `id` = ?"#,
-            10 => r#"UPDATE `users` SET `email` = ?, `last_name` = ? WHERE `id` = ?"#,
-            11 => {
-                r#"UPDATE `users` SET `created_at` = ?, `email` = ?, `last_name` = ? WHERE `id` = ?"#
-            }
-            12 => r#"UPDATE `users` SET `first_name` = ?, `last_name` = ? WHERE `id` = ?"#,
-            13 => {
-                r#"UPDATE `users` SET `created_at` = ?, `first_name` = ?, `last_name` = ? WHERE `id` = ?"#
-            }
-            14 => {
-                r#"UPDATE `users` SET `email` = ?, `first_name` = ?, `last_name` = ? WHERE `id` = ?"#
-            }
-            15 => {
-                r#"UPDATE `users` SET `created_at` = ?, `email` = ?, `first_name` = ?, `last_name` = ? WHERE `id` = ?"#
-            }
-            16 => r#"UPDATE `users` SET `status` = ? WHERE `id` = ?"#,
-            17 => r#"UPDATE `users` SET `created_at` = ?, `status` = ? WHERE `id` = ?"#,
-            18 => r#"UPDATE `users` SET `email` = ?, `status` = ? WHERE `id` = ?"#,
-            19 => {
-                r#"UPDATE `users` SET `created_at` = ?, `email` = ?, `status` = ? WHERE `id` = ?"#
-            }
-            20 => r#"UPDATE `users` SET `first_name` = ?, `status` = ? WHERE `id` = ?"#,
-            21 => {
-                r#"UPDATE `users` SET `created_at` = ?, `first_name` = ?, `status` = ? WHERE `id` = ?"#
-            }
-            22 => {
-                r#"UPDATE `users` SET `email` = ?, `first_name` = ?, `status` = ? WHERE `id` = ?"#
-            }
-            23 => {
-                r#"UPDATE `users` SET `created_at` = ?, `email` = ?, `first_name` = ?, `status` = ? WHERE `id` = ?"#
-            }
-            24 => r#"UPDATE `users` SET `last_name` = ?, `status` = ? WHERE `id` = ?"#,
-            25 => {
-                r#"UPDATE `users` SET `created_at` = ?, `last_name` = ?, `status` = ? WHERE `id` = ?"#
-            }
-            26 => r#"UPDATE `users` SET `email` = ?, `last_name` = ?, `status` = ? WHERE `id` = ?"#,
-            27 => {
-                r#"UPDATE `users` SET `created_at` = ?, `email` = ?, `last_name` = ?, `status` = ? WHERE `id` = ?"#
-            }
-            28 => {
-                r#"UPDATE `users` SET `first_name` = ?, `last_name` = ?, `status` = ? WHERE `id` = ?"#
-            }
-            29 => {
-                r#"UPDATE `users` SET `created_at` = ?, `first_name` = ?, `last_name` = ?, `status` = ? WHERE `id` = ?"#
-            }
-            30 => {
-                r#"UPDATE `users` SET `email` = ?, `first_name` = ?, `last_name` = ?, `status` = ? WHERE `id` = ?"#
-            }
-            31 => {
-                r#"UPDATE `users` SET `created_at` = ?, `email` = ?, `first_name` = ?, `last_name` = ?, `status` = ? WHERE `id` = ?"#
-            }
-            _ => return Err(sqlx::Error::Protocol("invalid patch mask".into())),
         };
-
-        let mut query = sqlx::query::<sqlx::MySql>(query_str);
+        let mut query = sqlx::query::<sqlx::MySql>(safe_query_str);
         if let Some(val) = &patch.created_at {
             query = query.bind(val);
         }

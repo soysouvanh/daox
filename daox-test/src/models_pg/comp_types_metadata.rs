@@ -256,8 +256,18 @@ impl CompTypesMetadata {
                     write!(&mut payload, "\"{}\"", v).unwrap();
                 }
                 payload.push('\n');
+                if payload.len() > 10 * 1024 * 1024 {
+                    {
+                        copy_in.send(payload.as_bytes()).await?;
+                        payload.clear();
+                    }
+                }
             }
-            copy_in.send(payload.as_bytes()).await?;
+            if !payload.is_empty() {
+                {
+                    copy_in.send(payload.as_bytes()).await?;
+                }
+            }
         }
         copy_in.finish().await?;
         Ok(items.len() as u64)
@@ -385,216 +395,55 @@ impl CompTypesMetadata {
         id: i64,
         patch: &CompTypesMetadataPatch,
     ) -> sqlx::Result<u64> {
-        let mut mask = 0u64;
-        let mut has = false;
+        let mut set_clauses: Vec<String> = Vec::new();
+        let mut _param_idx = 1usize;
         if patch.comp_types_id.is_some() {
-            mask |= 1 << 0;
-            has = true;
+            set_clauses.push(format!("\"comp_types_id\" = ${}", _param_idx));
+            _param_idx += 1;
         }
         if patch.f_blob.is_some() {
-            mask |= 1 << 1;
-            has = true;
+            set_clauses.push(format!("\"f_blob\" = ${}", _param_idx));
+            _param_idx += 1;
         }
         if patch.f_date.is_some() {
-            mask |= 1 << 2;
-            has = true;
+            set_clauses.push(format!("\"f_date\" = ${}", _param_idx));
+            _param_idx += 1;
         }
         if patch.f_datetime.is_some() {
-            mask |= 1 << 3;
-            has = true;
+            set_clauses.push(format!("\"f_datetime\" = ${}", _param_idx));
+            _param_idx += 1;
         }
         if patch.f_json.is_some() {
-            mask |= 1 << 4;
-            has = true;
+            set_clauses.push(format!("\"f_json\" = ${}", _param_idx));
+            _param_idx += 1;
         }
         if patch.f_timestamp.is_some() {
-            mask |= 1 << 5;
-            has = true;
+            set_clauses.push(format!("\"f_timestamp\" = ${}", _param_idx));
+            _param_idx += 1;
         }
-        if !has {
+        if set_clauses.is_empty() {
             return Ok(0);
         }
-
-        let query_str = match mask {
-            1 => r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1 WHERE "id" = $2"#,
-            2 => r#"UPDATE "comp_types_metadata" SET "f_blob" = $1 WHERE "id" = $2"#,
-            3 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_blob" = $2 WHERE "id" = $3"#
+        let mut query_str = format!(
+            "UPDATE \"comp_types_metadata\" SET {}",
+            set_clauses.join(", ")
+        );
+        query_str.push_str(&format!(" WHERE \"id\" = ${}", _param_idx));
+        _param_idx += 1;
+        static CACHE: std::sync::OnceLock<
+            std::sync::RwLock<std::collections::HashMap<String, &'static str>>,
+        > = std::sync::OnceLock::new();
+        let cache = CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let safe_query_str: &'static str = {
+            if let Some(s) = cache.read().unwrap().get(&query_str) {
+                *s
+            } else {
+                let leaked = Box::leak(query_str.clone().into_boxed_str());
+                cache.write().unwrap().insert(query_str, leaked);
+                leaked
             }
-            4 => r#"UPDATE "comp_types_metadata" SET "f_date" = $1 WHERE "id" = $2"#,
-            5 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_date" = $2 WHERE "id" = $3"#
-            }
-            6 => r#"UPDATE "comp_types_metadata" SET "f_blob" = $1, "f_date" = $2 WHERE "id" = $3"#,
-            7 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_blob" = $2, "f_date" = $3 WHERE "id" = $4"#
-            }
-            8 => r#"UPDATE "comp_types_metadata" SET "f_datetime" = $1 WHERE "id" = $2"#,
-            9 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_datetime" = $2 WHERE "id" = $3"#
-            }
-            10 => {
-                r#"UPDATE "comp_types_metadata" SET "f_blob" = $1, "f_datetime" = $2 WHERE "id" = $3"#
-            }
-            11 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_blob" = $2, "f_datetime" = $3 WHERE "id" = $4"#
-            }
-            12 => {
-                r#"UPDATE "comp_types_metadata" SET "f_date" = $1, "f_datetime" = $2 WHERE "id" = $3"#
-            }
-            13 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_date" = $2, "f_datetime" = $3 WHERE "id" = $4"#
-            }
-            14 => {
-                r#"UPDATE "comp_types_metadata" SET "f_blob" = $1, "f_date" = $2, "f_datetime" = $3 WHERE "id" = $4"#
-            }
-            15 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_blob" = $2, "f_date" = $3, "f_datetime" = $4 WHERE "id" = $5"#
-            }
-            16 => r#"UPDATE "comp_types_metadata" SET "f_json" = $1 WHERE "id" = $2"#,
-            17 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_json" = $2 WHERE "id" = $3"#
-            }
-            18 => {
-                r#"UPDATE "comp_types_metadata" SET "f_blob" = $1, "f_json" = $2 WHERE "id" = $3"#
-            }
-            19 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_blob" = $2, "f_json" = $3 WHERE "id" = $4"#
-            }
-            20 => {
-                r#"UPDATE "comp_types_metadata" SET "f_date" = $1, "f_json" = $2 WHERE "id" = $3"#
-            }
-            21 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_date" = $2, "f_json" = $3 WHERE "id" = $4"#
-            }
-            22 => {
-                r#"UPDATE "comp_types_metadata" SET "f_blob" = $1, "f_date" = $2, "f_json" = $3 WHERE "id" = $4"#
-            }
-            23 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_blob" = $2, "f_date" = $3, "f_json" = $4 WHERE "id" = $5"#
-            }
-            24 => {
-                r#"UPDATE "comp_types_metadata" SET "f_datetime" = $1, "f_json" = $2 WHERE "id" = $3"#
-            }
-            25 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_datetime" = $2, "f_json" = $3 WHERE "id" = $4"#
-            }
-            26 => {
-                r#"UPDATE "comp_types_metadata" SET "f_blob" = $1, "f_datetime" = $2, "f_json" = $3 WHERE "id" = $4"#
-            }
-            27 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_blob" = $2, "f_datetime" = $3, "f_json" = $4 WHERE "id" = $5"#
-            }
-            28 => {
-                r#"UPDATE "comp_types_metadata" SET "f_date" = $1, "f_datetime" = $2, "f_json" = $3 WHERE "id" = $4"#
-            }
-            29 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_date" = $2, "f_datetime" = $3, "f_json" = $4 WHERE "id" = $5"#
-            }
-            30 => {
-                r#"UPDATE "comp_types_metadata" SET "f_blob" = $1, "f_date" = $2, "f_datetime" = $3, "f_json" = $4 WHERE "id" = $5"#
-            }
-            31 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_blob" = $2, "f_date" = $3, "f_datetime" = $4, "f_json" = $5 WHERE "id" = $6"#
-            }
-            32 => r#"UPDATE "comp_types_metadata" SET "f_timestamp" = $1 WHERE "id" = $2"#,
-            33 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_timestamp" = $2 WHERE "id" = $3"#
-            }
-            34 => {
-                r#"UPDATE "comp_types_metadata" SET "f_blob" = $1, "f_timestamp" = $2 WHERE "id" = $3"#
-            }
-            35 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_blob" = $2, "f_timestamp" = $3 WHERE "id" = $4"#
-            }
-            36 => {
-                r#"UPDATE "comp_types_metadata" SET "f_date" = $1, "f_timestamp" = $2 WHERE "id" = $3"#
-            }
-            37 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_date" = $2, "f_timestamp" = $3 WHERE "id" = $4"#
-            }
-            38 => {
-                r#"UPDATE "comp_types_metadata" SET "f_blob" = $1, "f_date" = $2, "f_timestamp" = $3 WHERE "id" = $4"#
-            }
-            39 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_blob" = $2, "f_date" = $3, "f_timestamp" = $4 WHERE "id" = $5"#
-            }
-            40 => {
-                r#"UPDATE "comp_types_metadata" SET "f_datetime" = $1, "f_timestamp" = $2 WHERE "id" = $3"#
-            }
-            41 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_datetime" = $2, "f_timestamp" = $3 WHERE "id" = $4"#
-            }
-            42 => {
-                r#"UPDATE "comp_types_metadata" SET "f_blob" = $1, "f_datetime" = $2, "f_timestamp" = $3 WHERE "id" = $4"#
-            }
-            43 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_blob" = $2, "f_datetime" = $3, "f_timestamp" = $4 WHERE "id" = $5"#
-            }
-            44 => {
-                r#"UPDATE "comp_types_metadata" SET "f_date" = $1, "f_datetime" = $2, "f_timestamp" = $3 WHERE "id" = $4"#
-            }
-            45 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_date" = $2, "f_datetime" = $3, "f_timestamp" = $4 WHERE "id" = $5"#
-            }
-            46 => {
-                r#"UPDATE "comp_types_metadata" SET "f_blob" = $1, "f_date" = $2, "f_datetime" = $3, "f_timestamp" = $4 WHERE "id" = $5"#
-            }
-            47 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_blob" = $2, "f_date" = $3, "f_datetime" = $4, "f_timestamp" = $5 WHERE "id" = $6"#
-            }
-            48 => {
-                r#"UPDATE "comp_types_metadata" SET "f_json" = $1, "f_timestamp" = $2 WHERE "id" = $3"#
-            }
-            49 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_json" = $2, "f_timestamp" = $3 WHERE "id" = $4"#
-            }
-            50 => {
-                r#"UPDATE "comp_types_metadata" SET "f_blob" = $1, "f_json" = $2, "f_timestamp" = $3 WHERE "id" = $4"#
-            }
-            51 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_blob" = $2, "f_json" = $3, "f_timestamp" = $4 WHERE "id" = $5"#
-            }
-            52 => {
-                r#"UPDATE "comp_types_metadata" SET "f_date" = $1, "f_json" = $2, "f_timestamp" = $3 WHERE "id" = $4"#
-            }
-            53 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_date" = $2, "f_json" = $3, "f_timestamp" = $4 WHERE "id" = $5"#
-            }
-            54 => {
-                r#"UPDATE "comp_types_metadata" SET "f_blob" = $1, "f_date" = $2, "f_json" = $3, "f_timestamp" = $4 WHERE "id" = $5"#
-            }
-            55 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_blob" = $2, "f_date" = $3, "f_json" = $4, "f_timestamp" = $5 WHERE "id" = $6"#
-            }
-            56 => {
-                r#"UPDATE "comp_types_metadata" SET "f_datetime" = $1, "f_json" = $2, "f_timestamp" = $3 WHERE "id" = $4"#
-            }
-            57 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_datetime" = $2, "f_json" = $3, "f_timestamp" = $4 WHERE "id" = $5"#
-            }
-            58 => {
-                r#"UPDATE "comp_types_metadata" SET "f_blob" = $1, "f_datetime" = $2, "f_json" = $3, "f_timestamp" = $4 WHERE "id" = $5"#
-            }
-            59 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_blob" = $2, "f_datetime" = $3, "f_json" = $4, "f_timestamp" = $5 WHERE "id" = $6"#
-            }
-            60 => {
-                r#"UPDATE "comp_types_metadata" SET "f_date" = $1, "f_datetime" = $2, "f_json" = $3, "f_timestamp" = $4 WHERE "id" = $5"#
-            }
-            61 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_date" = $2, "f_datetime" = $3, "f_json" = $4, "f_timestamp" = $5 WHERE "id" = $6"#
-            }
-            62 => {
-                r#"UPDATE "comp_types_metadata" SET "f_blob" = $1, "f_date" = $2, "f_datetime" = $3, "f_json" = $4, "f_timestamp" = $5 WHERE "id" = $6"#
-            }
-            63 => {
-                r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_blob" = $2, "f_date" = $3, "f_datetime" = $4, "f_json" = $5, "f_timestamp" = $6 WHERE "id" = $7"#
-            }
-            _ => return Err(sqlx::Error::Protocol("invalid patch mask".into())),
         };
-
-        let mut query = sqlx::query::<sqlx::Postgres>(query_str);
+        let mut query = sqlx::query::<sqlx::Postgres>(safe_query_str);
         if let Some(val) = &patch.comp_types_id {
             query = query.bind(val);
         }

@@ -69,9 +69,29 @@ impl CompTypesTable {
                 errors.push("f_int: maximum value '2147483647' exceeded".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.f_text.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("f_text: format constraint not met".into());
+            }
+        }
         if let Some(v) = self.f_varchar.as_ref() {
             if v.len() > 255 {
                 errors.push("f_varchar: exceeds max_length 255".into());
+            }
+        }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.f_varchar.as_ref() {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| {
+                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
+            });
+            if !re.is_match(v) {
+                errors.push("f_varchar: format constraint not met".into());
             }
         }
         if let Some(v) = Some(&self.id) {
@@ -277,8 +297,18 @@ impl CompTypesTable {
                     payload.push('"');
                 }
                 payload.push('\n');
+                if payload.len() > 10 * 1024 * 1024 {
+                    {
+                        copy_in.send(payload.as_bytes()).await?;
+                        payload.clear();
+                    }
+                }
             }
-            copy_in.send(payload.as_bytes()).await?;
+            if !payload.is_empty() {
+                {
+                    copy_in.send(payload.as_bytes()).await?;
+                }
+            }
         }
         copy_in.finish().await?;
         Ok(items.len() as u64)
@@ -409,388 +439,56 @@ impl CompTypesTable {
         id: i64,
         patch: &CompTypesTablePatch,
     ) -> sqlx::Result<u64> {
-        let mut mask = 0u64;
-        let mut has = false;
+        let mut set_clauses: Vec<String> = Vec::new();
+        let mut _param_idx = 1usize;
         if patch.f_bool.is_some() {
-            mask |= 1 << 0;
-            has = true;
+            set_clauses.push(format!("\"f_bool\" = ${}", _param_idx));
+            _param_idx += 1;
         }
         if patch.f_decimal.is_some() {
-            mask |= 1 << 1;
-            has = true;
+            set_clauses.push(format!("\"f_decimal\" = ${}", _param_idx));
+            _param_idx += 1;
         }
         if patch.f_double.is_some() {
-            mask |= 1 << 2;
-            has = true;
+            set_clauses.push(format!("\"f_double\" = ${}", _param_idx));
+            _param_idx += 1;
         }
         if patch.f_float.is_some() {
-            mask |= 1 << 3;
-            has = true;
+            set_clauses.push(format!("\"f_float\" = ${}", _param_idx));
+            _param_idx += 1;
         }
         if patch.f_int.is_some() {
-            mask |= 1 << 4;
-            has = true;
+            set_clauses.push(format!("\"f_int\" = ${}", _param_idx));
+            _param_idx += 1;
         }
         if patch.f_text.is_some() {
-            mask |= 1 << 5;
-            has = true;
+            set_clauses.push(format!("\"f_text\" = ${}", _param_idx));
+            _param_idx += 1;
         }
         if patch.f_varchar.is_some() {
-            mask |= 1 << 6;
-            has = true;
+            set_clauses.push(format!("\"f_varchar\" = ${}", _param_idx));
+            _param_idx += 1;
         }
-        if !has {
+        if set_clauses.is_empty() {
             return Ok(0);
         }
-
-        let query_str = match mask {
-            1 => r#"UPDATE "comp_types_table" SET "f_bool" = $1 WHERE "id" = $2"#,
-            2 => r#"UPDATE "comp_types_table" SET "f_decimal" = $1 WHERE "id" = $2"#,
-            3 => r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2 WHERE "id" = $3"#,
-            4 => r#"UPDATE "comp_types_table" SET "f_double" = $1 WHERE "id" = $2"#,
-            5 => r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_double" = $2 WHERE "id" = $3"#,
-            6 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_double" = $2 WHERE "id" = $3"#
+        let mut query_str = format!("UPDATE \"comp_types_table\" SET {}", set_clauses.join(", "));
+        query_str.push_str(&format!(" WHERE \"id\" = ${}", _param_idx));
+        _param_idx += 1;
+        static CACHE: std::sync::OnceLock<
+            std::sync::RwLock<std::collections::HashMap<String, &'static str>>,
+        > = std::sync::OnceLock::new();
+        let cache = CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let safe_query_str: &'static str = {
+            if let Some(s) = cache.read().unwrap().get(&query_str) {
+                *s
+            } else {
+                let leaked = Box::leak(query_str.clone().into_boxed_str());
+                cache.write().unwrap().insert(query_str, leaked);
+                leaked
             }
-            7 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_double" = $3 WHERE "id" = $4"#
-            }
-            8 => r#"UPDATE "comp_types_table" SET "f_float" = $1 WHERE "id" = $2"#,
-            9 => r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_float" = $2 WHERE "id" = $3"#,
-            10 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_float" = $2 WHERE "id" = $3"#
-            }
-            11 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_float" = $3 WHERE "id" = $4"#
-            }
-            12 => {
-                r#"UPDATE "comp_types_table" SET "f_double" = $1, "f_float" = $2 WHERE "id" = $3"#
-            }
-            13 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_double" = $2, "f_float" = $3 WHERE "id" = $4"#
-            }
-            14 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_double" = $2, "f_float" = $3 WHERE "id" = $4"#
-            }
-            15 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_double" = $3, "f_float" = $4 WHERE "id" = $5"#
-            }
-            16 => r#"UPDATE "comp_types_table" SET "f_int" = $1 WHERE "id" = $2"#,
-            17 => r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_int" = $2 WHERE "id" = $3"#,
-            18 => r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_int" = $2 WHERE "id" = $3"#,
-            19 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_int" = $3 WHERE "id" = $4"#
-            }
-            20 => r#"UPDATE "comp_types_table" SET "f_double" = $1, "f_int" = $2 WHERE "id" = $3"#,
-            21 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_double" = $2, "f_int" = $3 WHERE "id" = $4"#
-            }
-            22 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_double" = $2, "f_int" = $3 WHERE "id" = $4"#
-            }
-            23 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_double" = $3, "f_int" = $4 WHERE "id" = $5"#
-            }
-            24 => r#"UPDATE "comp_types_table" SET "f_float" = $1, "f_int" = $2 WHERE "id" = $3"#,
-            25 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_float" = $2, "f_int" = $3 WHERE "id" = $4"#
-            }
-            26 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_float" = $2, "f_int" = $3 WHERE "id" = $4"#
-            }
-            27 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_float" = $3, "f_int" = $4 WHERE "id" = $5"#
-            }
-            28 => {
-                r#"UPDATE "comp_types_table" SET "f_double" = $1, "f_float" = $2, "f_int" = $3 WHERE "id" = $4"#
-            }
-            29 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_double" = $2, "f_float" = $3, "f_int" = $4 WHERE "id" = $5"#
-            }
-            30 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_double" = $2, "f_float" = $3, "f_int" = $4 WHERE "id" = $5"#
-            }
-            31 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_double" = $3, "f_float" = $4, "f_int" = $5 WHERE "id" = $6"#
-            }
-            32 => r#"UPDATE "comp_types_table" SET "f_text" = $1 WHERE "id" = $2"#,
-            33 => r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_text" = $2 WHERE "id" = $3"#,
-            34 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_text" = $2 WHERE "id" = $3"#
-            }
-            35 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_text" = $3 WHERE "id" = $4"#
-            }
-            36 => r#"UPDATE "comp_types_table" SET "f_double" = $1, "f_text" = $2 WHERE "id" = $3"#,
-            37 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_double" = $2, "f_text" = $3 WHERE "id" = $4"#
-            }
-            38 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_double" = $2, "f_text" = $3 WHERE "id" = $4"#
-            }
-            39 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_double" = $3, "f_text" = $4 WHERE "id" = $5"#
-            }
-            40 => r#"UPDATE "comp_types_table" SET "f_float" = $1, "f_text" = $2 WHERE "id" = $3"#,
-            41 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_float" = $2, "f_text" = $3 WHERE "id" = $4"#
-            }
-            42 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_float" = $2, "f_text" = $3 WHERE "id" = $4"#
-            }
-            43 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_float" = $3, "f_text" = $4 WHERE "id" = $5"#
-            }
-            44 => {
-                r#"UPDATE "comp_types_table" SET "f_double" = $1, "f_float" = $2, "f_text" = $3 WHERE "id" = $4"#
-            }
-            45 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_double" = $2, "f_float" = $3, "f_text" = $4 WHERE "id" = $5"#
-            }
-            46 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_double" = $2, "f_float" = $3, "f_text" = $4 WHERE "id" = $5"#
-            }
-            47 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_double" = $3, "f_float" = $4, "f_text" = $5 WHERE "id" = $6"#
-            }
-            48 => r#"UPDATE "comp_types_table" SET "f_int" = $1, "f_text" = $2 WHERE "id" = $3"#,
-            49 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_int" = $2, "f_text" = $3 WHERE "id" = $4"#
-            }
-            50 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_int" = $2, "f_text" = $3 WHERE "id" = $4"#
-            }
-            51 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_int" = $3, "f_text" = $4 WHERE "id" = $5"#
-            }
-            52 => {
-                r#"UPDATE "comp_types_table" SET "f_double" = $1, "f_int" = $2, "f_text" = $3 WHERE "id" = $4"#
-            }
-            53 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_double" = $2, "f_int" = $3, "f_text" = $4 WHERE "id" = $5"#
-            }
-            54 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_double" = $2, "f_int" = $3, "f_text" = $4 WHERE "id" = $5"#
-            }
-            55 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_double" = $3, "f_int" = $4, "f_text" = $5 WHERE "id" = $6"#
-            }
-            56 => {
-                r#"UPDATE "comp_types_table" SET "f_float" = $1, "f_int" = $2, "f_text" = $3 WHERE "id" = $4"#
-            }
-            57 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_float" = $2, "f_int" = $3, "f_text" = $4 WHERE "id" = $5"#
-            }
-            58 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_float" = $2, "f_int" = $3, "f_text" = $4 WHERE "id" = $5"#
-            }
-            59 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_float" = $3, "f_int" = $4, "f_text" = $5 WHERE "id" = $6"#
-            }
-            60 => {
-                r#"UPDATE "comp_types_table" SET "f_double" = $1, "f_float" = $2, "f_int" = $3, "f_text" = $4 WHERE "id" = $5"#
-            }
-            61 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_double" = $2, "f_float" = $3, "f_int" = $4, "f_text" = $5 WHERE "id" = $6"#
-            }
-            62 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_double" = $2, "f_float" = $3, "f_int" = $4, "f_text" = $5 WHERE "id" = $6"#
-            }
-            63 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_double" = $3, "f_float" = $4, "f_int" = $5, "f_text" = $6 WHERE "id" = $7"#
-            }
-            64 => r#"UPDATE "comp_types_table" SET "f_varchar" = $1 WHERE "id" = $2"#,
-            65 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_varchar" = $2 WHERE "id" = $3"#
-            }
-            66 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_varchar" = $2 WHERE "id" = $3"#
-            }
-            67 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_varchar" = $3 WHERE "id" = $4"#
-            }
-            68 => {
-                r#"UPDATE "comp_types_table" SET "f_double" = $1, "f_varchar" = $2 WHERE "id" = $3"#
-            }
-            69 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_double" = $2, "f_varchar" = $3 WHERE "id" = $4"#
-            }
-            70 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_double" = $2, "f_varchar" = $3 WHERE "id" = $4"#
-            }
-            71 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_double" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            72 => {
-                r#"UPDATE "comp_types_table" SET "f_float" = $1, "f_varchar" = $2 WHERE "id" = $3"#
-            }
-            73 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_float" = $2, "f_varchar" = $3 WHERE "id" = $4"#
-            }
-            74 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_float" = $2, "f_varchar" = $3 WHERE "id" = $4"#
-            }
-            75 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_float" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            76 => {
-                r#"UPDATE "comp_types_table" SET "f_double" = $1, "f_float" = $2, "f_varchar" = $3 WHERE "id" = $4"#
-            }
-            77 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_double" = $2, "f_float" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            78 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_double" = $2, "f_float" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            79 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_double" = $3, "f_float" = $4, "f_varchar" = $5 WHERE "id" = $6"#
-            }
-            80 => r#"UPDATE "comp_types_table" SET "f_int" = $1, "f_varchar" = $2 WHERE "id" = $3"#,
-            81 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_int" = $2, "f_varchar" = $3 WHERE "id" = $4"#
-            }
-            82 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_int" = $2, "f_varchar" = $3 WHERE "id" = $4"#
-            }
-            83 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_int" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            84 => {
-                r#"UPDATE "comp_types_table" SET "f_double" = $1, "f_int" = $2, "f_varchar" = $3 WHERE "id" = $4"#
-            }
-            85 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_double" = $2, "f_int" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            86 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_double" = $2, "f_int" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            87 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_double" = $3, "f_int" = $4, "f_varchar" = $5 WHERE "id" = $6"#
-            }
-            88 => {
-                r#"UPDATE "comp_types_table" SET "f_float" = $1, "f_int" = $2, "f_varchar" = $3 WHERE "id" = $4"#
-            }
-            89 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_float" = $2, "f_int" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            90 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_float" = $2, "f_int" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            91 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_float" = $3, "f_int" = $4, "f_varchar" = $5 WHERE "id" = $6"#
-            }
-            92 => {
-                r#"UPDATE "comp_types_table" SET "f_double" = $1, "f_float" = $2, "f_int" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            93 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_double" = $2, "f_float" = $3, "f_int" = $4, "f_varchar" = $5 WHERE "id" = $6"#
-            }
-            94 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_double" = $2, "f_float" = $3, "f_int" = $4, "f_varchar" = $5 WHERE "id" = $6"#
-            }
-            95 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_double" = $3, "f_float" = $4, "f_int" = $5, "f_varchar" = $6 WHERE "id" = $7"#
-            }
-            96 => {
-                r#"UPDATE "comp_types_table" SET "f_text" = $1, "f_varchar" = $2 WHERE "id" = $3"#
-            }
-            97 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_text" = $2, "f_varchar" = $3 WHERE "id" = $4"#
-            }
-            98 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_text" = $2, "f_varchar" = $3 WHERE "id" = $4"#
-            }
-            99 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_text" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            100 => {
-                r#"UPDATE "comp_types_table" SET "f_double" = $1, "f_text" = $2, "f_varchar" = $3 WHERE "id" = $4"#
-            }
-            101 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_double" = $2, "f_text" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            102 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_double" = $2, "f_text" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            103 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_double" = $3, "f_text" = $4, "f_varchar" = $5 WHERE "id" = $6"#
-            }
-            104 => {
-                r#"UPDATE "comp_types_table" SET "f_float" = $1, "f_text" = $2, "f_varchar" = $3 WHERE "id" = $4"#
-            }
-            105 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_float" = $2, "f_text" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            106 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_float" = $2, "f_text" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            107 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_float" = $3, "f_text" = $4, "f_varchar" = $5 WHERE "id" = $6"#
-            }
-            108 => {
-                r#"UPDATE "comp_types_table" SET "f_double" = $1, "f_float" = $2, "f_text" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            109 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_double" = $2, "f_float" = $3, "f_text" = $4, "f_varchar" = $5 WHERE "id" = $6"#
-            }
-            110 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_double" = $2, "f_float" = $3, "f_text" = $4, "f_varchar" = $5 WHERE "id" = $6"#
-            }
-            111 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_double" = $3, "f_float" = $4, "f_text" = $5, "f_varchar" = $6 WHERE "id" = $7"#
-            }
-            112 => {
-                r#"UPDATE "comp_types_table" SET "f_int" = $1, "f_text" = $2, "f_varchar" = $3 WHERE "id" = $4"#
-            }
-            113 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_int" = $2, "f_text" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            114 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_int" = $2, "f_text" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            115 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_int" = $3, "f_text" = $4, "f_varchar" = $5 WHERE "id" = $6"#
-            }
-            116 => {
-                r#"UPDATE "comp_types_table" SET "f_double" = $1, "f_int" = $2, "f_text" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            117 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_double" = $2, "f_int" = $3, "f_text" = $4, "f_varchar" = $5 WHERE "id" = $6"#
-            }
-            118 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_double" = $2, "f_int" = $3, "f_text" = $4, "f_varchar" = $5 WHERE "id" = $6"#
-            }
-            119 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_double" = $3, "f_int" = $4, "f_text" = $5, "f_varchar" = $6 WHERE "id" = $7"#
-            }
-            120 => {
-                r#"UPDATE "comp_types_table" SET "f_float" = $1, "f_int" = $2, "f_text" = $3, "f_varchar" = $4 WHERE "id" = $5"#
-            }
-            121 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_float" = $2, "f_int" = $3, "f_text" = $4, "f_varchar" = $5 WHERE "id" = $6"#
-            }
-            122 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_float" = $2, "f_int" = $3, "f_text" = $4, "f_varchar" = $5 WHERE "id" = $6"#
-            }
-            123 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_float" = $3, "f_int" = $4, "f_text" = $5, "f_varchar" = $6 WHERE "id" = $7"#
-            }
-            124 => {
-                r#"UPDATE "comp_types_table" SET "f_double" = $1, "f_float" = $2, "f_int" = $3, "f_text" = $4, "f_varchar" = $5 WHERE "id" = $6"#
-            }
-            125 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_double" = $2, "f_float" = $3, "f_int" = $4, "f_text" = $5, "f_varchar" = $6 WHERE "id" = $7"#
-            }
-            126 => {
-                r#"UPDATE "comp_types_table" SET "f_decimal" = $1, "f_double" = $2, "f_float" = $3, "f_int" = $4, "f_text" = $5, "f_varchar" = $6 WHERE "id" = $7"#
-            }
-            127 => {
-                r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_double" = $3, "f_float" = $4, "f_int" = $5, "f_text" = $6, "f_varchar" = $7 WHERE "id" = $8"#
-            }
-            _ => return Err(sqlx::Error::Protocol("invalid patch mask".into())),
         };
-
-        let mut query = sqlx::query::<sqlx::Postgres>(query_str);
+        let mut query = sqlx::query::<sqlx::Postgres>(safe_query_str);
         if let Some(val) = &patch.f_bool {
             query = query.bind(val);
         }

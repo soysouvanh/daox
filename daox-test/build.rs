@@ -5,6 +5,20 @@ use std::path::Path;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Tell Cargo to re-run this build script ONLY if `build.rs` itself changes.
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=../.env");
+
+    if let Ok(content) = std::fs::read_to_string("../.env") {
+        for line in content.lines() {
+            let line = line.trim();
+            if !line.is_empty() && !line.starts_with('#') {
+                if let Some((k, v)) = line.split_once('=') {
+                    unsafe {
+                        std::env::set_var(k.trim(), v.trim().trim_matches('"'));
+                    }
+                }
+            }
+        }
+    }
 
     // Re-run if the core generator (`daox`) source code changes.
     println!("cargo:rerun-if-changed=../daox/src");
@@ -18,10 +32,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=src/models_sqlite/overrides");
 
     // Database connection URLs
-    let mysql_url = std::env::var("DATABASE_URL_MYSQL")
-        .unwrap_or_else(|_| "mysql://root:root@127.0.0.1:3307/daox_test".to_string());
-    let pg_url = std::env::var("DATABASE_URL_PG")
-        .unwrap_or_else(|_| "postgres://root:root@127.0.0.1:5433/daox_test".to_string());
+    let mysql_url = std::env::var("DATABASE_URL_MYSQL").map_err(|e| {
+        format!(
+            "DATABASE_URL_MYSQL is required for Daox code generation: {}",
+            e
+        )
+    })?;
+    let pg_url = std::env::var("DATABASE_URL_PG").map_err(|e| {
+        format!(
+            "DATABASE_URL_PG is required for Daox code generation: {}",
+            e
+        )
+    })?;
 
     let mysql_out = "src/models_mysql";
     let pg_out = "src/models_pg";

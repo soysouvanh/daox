@@ -24,7 +24,7 @@ message = "schema.min_length.message|0"
 # message = 
 
 [format]
-value = ""
+value = "^.*$"
 message = "schema.format.message"
 
 [is_primary_key]
