@@ -41,21 +41,26 @@ impl UserRoles {
         }
         #[cfg(feature = "validation")]
         if let Some(v) = Some(&self.role_name) {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("role_name: format constraint not met".into());
+            static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+            match re {
+                Some(re) => {
+                    if !re.is_match(v) {
+                        errors.push("role_name: format constraint not met".into());
+                    }
+                }
+                None => {
+                    errors.push("role_name: configured regex is invalid".into());
+                }
             }
         }
         if let Some(v) = Some(&self.user_id) {
-            if (*v as i64) < 0 {
+            if (*v as i128) < (0 as i128) {
                 errors.push("user_id: minimum value '0' not met".into());
             }
         }
         if let Some(v) = Some(&self.user_id) {
-            if (*v as i64) > 9223372036854775807 {
+            if (*v as i128) > (9223372036854775807 as i128) {
                 errors.push("user_id: maximum value '9223372036854775807' exceeded".into());
             }
         }

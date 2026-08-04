@@ -6,5 +6,7 @@ columns = ["user_id"]
 [[indexes]]
 name = "idx_user_role"
 is_unique = true
-columns = ["user_id", "role_name"]
-
+columns = [
+    "user_id",
+    "role_name",
+]

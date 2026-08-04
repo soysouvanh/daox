@@ -40,23 +40,28 @@ impl Configurations {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         if let Some(v) = Some(&self.id) {
-            if (*v as i64) < 0 {
+            if (*v as i128) < (0 as i128) {
                 errors.push("id: minimum value '0' not met".into());
             }
         }
         if let Some(v) = Some(&self.id) {
-            if (*v as i64) > 2147483647 {
+            if (*v as i128) > (2147483647 as i128) {
                 errors.push("id: maximum value '2147483647' exceeded".into());
             }
         }
         #[cfg(feature = "validation")]
         if let Some(v) = self.r#match.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("r#match: format constraint not met".into());
+            static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+            match re {
+                Some(re) => {
+                    if !re.is_match(v) {
+                        errors.push("r#match: format constraint not met".into());
+                    }
+                }
+                None => {
+                    errors.push("r#match: configured regex is invalid".into());
+                }
             }
         }
         if let Some(v) = Some(&self.r#type) {
@@ -66,22 +71,32 @@ impl Configurations {
         }
         #[cfg(feature = "validation")]
         if let Some(v) = Some(&self.r#type) {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("r#type: format constraint not met".into());
+            static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+            match re {
+                Some(re) => {
+                    if !re.is_match(v) {
+                        errors.push("r#type: format constraint not met".into());
+                    }
+                }
+                None => {
+                    errors.push("r#type: configured regex is invalid".into());
+                }
             }
         }
         #[cfg(feature = "validation")]
         if let Some(v) = self.value.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("value: format constraint not met".into());
+            static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+            match re {
+                Some(re) => {
+                    if !re.is_match(v) {
+                        errors.push("value: format constraint not met".into());
+                    }
+                }
+                None => {
+                    errors.push("value: configured regex is invalid".into());
+                }
             }
         }
         if errors.is_empty() {

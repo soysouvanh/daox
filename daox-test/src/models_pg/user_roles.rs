@@ -46,21 +46,26 @@ impl UserRoles {
         }
         #[cfg(feature = "validation")]
         if let Some(v) = Some(&self.role_name) {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("role_name: format constraint not met".into());
+            static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+            match re {
+                Some(re) => {
+                    if !re.is_match(v) {
+                        errors.push("role_name: format constraint not met".into());
+                    }
+                }
+                None => {
+                    errors.push("role_name: configured regex is invalid".into());
+                }
             }
         }
         if let Some(v) = Some(&self.user_id) {
-            if (*v as i64) < 0 {
+            if (*v as i128) < (0 as i128) {
                 errors.push("user_id: minimum value '0' not met".into());
             }
         }
         if let Some(v) = Some(&self.user_id) {
-            if (*v as i64) > 9223372036854775807 {
+            if (*v as i128) > (9223372036854775807 as i128) {
                 errors.push("user_id: maximum value '9223372036854775807' exceeded".into());
             }
         }
@@ -206,57 +211,6 @@ impl UserRoles {
         Ok(items.len() as u64)
     }
 
-    pub async fn get_by_user_id_and_role_name<
-        'e,
-        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
-    >(
-        executor: E,
-        user_id: i64,
-        role_name: &str,
-    ) -> sqlx::Result<Option<Self>> {
-        let query = r#"SELECT "assigned_at", "role_name", "user_id" FROM "user_roles" WHERE "user_id" = $1 AND "role_name" = $2"#;
-        sqlx::query_as::<_, Self>(query)
-            .bind(user_id)
-            .bind(role_name)
-            .fetch_optional(executor)
-            .await
-    }
-
-    pub async fn exists_by_user_id_and_role_name<
-        'e,
-        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
-    >(
-        executor: E,
-        user_id: i64,
-        role_name: &str,
-    ) -> sqlx::Result<bool> {
-        let query =
-            r#"SELECT 1 FROM "user_roles" WHERE "user_id" = $1 AND "role_name" = $2 LIMIT 1"#;
-        let exists: Option<(i32,)> = sqlx::query_as(query)
-            .bind(user_id)
-            .bind(role_name)
-            .fetch_optional(executor)
-            .await?;
-        Ok(exists.is_some())
-    }
-
-    pub async fn delete_by_user_id_and_role_name<
-        'e,
-        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
-    >(
-        executor: E,
-        user_id: i64,
-        role_name: &str,
-    ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM "user_roles" WHERE "user_id" = $1 AND "role_name" = $2"#;
-        let result = sqlx::query::<sqlx::Postgres>(query)
-            .bind(user_id)
-            .bind(role_name)
-            .execute(executor)
-            .await?;
-        Ok(result.rows_affected())
-    }
-
     pub async fn list_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
         executor: E,
         user_id: i64,
@@ -310,6 +264,57 @@ impl UserRoles {
         let query = r#"DELETE FROM "user_roles" WHERE "user_id" = $1"#;
         let result = sqlx::query::<sqlx::Postgres>(query)
             .bind(user_id)
+            .execute(executor)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn get_by_user_id_and_role_name<
+        'e,
+        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+    >(
+        executor: E,
+        user_id: i64,
+        role_name: &str,
+    ) -> sqlx::Result<Option<Self>> {
+        let query = r#"SELECT "assigned_at", "role_name", "user_id" FROM "user_roles" WHERE "user_id" = $1 AND "role_name" = $2"#;
+        sqlx::query_as::<_, Self>(query)
+            .bind(user_id)
+            .bind(role_name)
+            .fetch_optional(executor)
+            .await
+    }
+
+    pub async fn exists_by_user_id_and_role_name<
+        'e,
+        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+    >(
+        executor: E,
+        user_id: i64,
+        role_name: &str,
+    ) -> sqlx::Result<bool> {
+        let query =
+            r#"SELECT 1 FROM "user_roles" WHERE "user_id" = $1 AND "role_name" = $2 LIMIT 1"#;
+        let exists: Option<(i32,)> = sqlx::query_as(query)
+            .bind(user_id)
+            .bind(role_name)
+            .fetch_optional(executor)
+            .await?;
+        Ok(exists.is_some())
+    }
+
+    pub async fn delete_by_user_id_and_role_name<
+        'e,
+        E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+    >(
+        executor: E,
+        user_id: i64,
+        role_name: &str,
+    ) -> sqlx::Result<u64> {
+        let query = r#"DELETE FROM "user_roles" WHERE "user_id" = $1 AND "role_name" = $2"#;
+        let result = sqlx::query::<sqlx::Postgres>(query)
+            .bind(user_id)
+            .bind(role_name)
             .execute(executor)
             .await?;
         Ok(result.rows_affected())

@@ -37,3 +37,6 @@ daox = { path = "../daox", version = "0.2.7" }
 tokio = { version = "1", features = ["full"] }
 # SQLite is specifically initialized at compile-time directly in build.rs
 sqlx = { version = "0.9", features = ["sqlite", "runtime-tokio", "tls-rustls"] }
+
+[dev-dependencies]
+regex = "1"

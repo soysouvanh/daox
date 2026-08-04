@@ -1,32 +1,34 @@
 use std::fs;
 use std::path::Path;
 
+fn parse_dotenv(path: &str) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+
+    if let Ok(content) = std::fs::read_to_string(path) {
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            if let Some((k, v)) = line.split_once('=') {
+                let key = k.trim();
+                let value = v.trim().trim_matches('"');
+                if key.starts_with("DATABASE_URL") || key.starts_with("DAOX_") {
+                    out.insert(key.to_string(), value.to_string());
+                }
+            }
+        }
+    }
+
+    out
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Tell Cargo to re-run this build script ONLY if `build.rs` itself changes.
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=../.env");
-
-    // P-005: Only allow known-safe env var prefixes to prevent injection
-    const ALLOWED_ENV_PREFIXES: &[&str] = &["DATABASE_URL", "DAOX_"];
-    if let Ok(content) = std::fs::read_to_string("../.env") {
-        for line in content.lines() {
-            let line = line.trim();
-            if !line.is_empty() && !line.starts_with('#') {
-                if let Some((k, v)) = line.split_once('=') {
-                    let key = k.trim();
-                    if ALLOWED_ENV_PREFIXES.iter().any(|p| key.starts_with(p)) {
-                        // Safe: build scripts are single-threaded at this point
-                        unsafe {
-                            std::env::set_var(key, v.trim().trim_matches('"'));
-                        }
-                    } else {
-                        println!("cargo:warning=Daox: ignoring unexpected env var: {}", key);
-                    }
-                }
-            }
-        }
-    }
 
     // Re-run if the core generator (`daox`) source code changes.
     println!("cargo:rerun-if-changed=../daox/src");
@@ -39,19 +41,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=src/models_sqlite/.daox_schema");
     println!("cargo:rerun-if-changed=src/models_sqlite/overrides");
 
+    let dotenv = parse_dotenv("../.env");
+
     // Database connection URLs
-    let mysql_url = std::env::var("DATABASE_URL_MYSQL").map_err(|e| {
-        format!(
-            "DATABASE_URL_MYSQL is required for Daox code generation: {}",
-            e
-        )
-    })?;
-    let pg_url = std::env::var("DATABASE_URL_PG").map_err(|e| {
-        format!(
-            "DATABASE_URL_PG is required for Daox code generation: {}",
-            e
-        )
-    })?;
+    let mysql_url = std::env::var("DATABASE_URL_MYSQL")
+        .ok()
+        .or_else(|| dotenv.get("DATABASE_URL_MYSQL").cloned())
+        .ok_or("DATABASE_URL_MYSQL is required for Daox code generation")?;
+
+    let pg_url = std::env::var("DATABASE_URL_PG")
+        .ok()
+        .or_else(|| dotenv.get("DATABASE_URL_PG").cloned())
+        .ok_or("DATABASE_URL_PG is required for Daox code generation")?;
 
     let mysql_out = "src/models_mysql";
     let pg_out = "src/models_pg";

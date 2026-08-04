@@ -1,4 +1,3 @@
-
 #[cfg(test)]
 mod enum_escaping_tests {
     #[test]
@@ -489,40 +488,36 @@ mod enum_double_quote_tests {
         let mut current = String::new();
         let mut in_quote = false;
         let mut escape = false;
-        let mut prev_was_quote = false;
+        let mut chars = vals_str.chars().peekable();
 
-        for c in vals_str.chars() {
+        while let Some(c) = chars.next() {
             if escape {
                 current.push(c);
                 escape = false;
-                prev_was_quote = false;
-            } else if c == '\\' {
-                escape = true;
-                prev_was_quote = false;
-            } else if c == '\'' {
-                if in_quote && prev_was_quote {
-                    current.push('\'');
-                    prev_was_quote = false;
-                } else if in_quote {
-                    prev_was_quote = true;
-                } else {
-                    in_quote = true;
-                    prev_was_quote = false;
-                }
-            } else if c == ',' && !in_quote {
-                parsed_vals.push(current.trim().to_string());
-                current.clear();
-                prev_was_quote = false;
-            } else {
-                if prev_was_quote {
-                    in_quote = false;
-                    prev_was_quote = false;
-                }
-                current.push(c);
+                continue;
             }
-        }
-        if prev_was_quote {
-            in_quote = false;
+
+            match c {
+                '\\' if in_quote => {
+                    escape = true;
+                }
+                '\'' => {
+                    if in_quote {
+                        if chars.peek() == Some(&'\'') {
+                            current.push('\'');
+                            chars.next();
+                        } else {
+                            in_quote = false;
+                        }
+                    } else {
+                        in_quote = true;
+                    }
+                }
+                ',' if !in_quote => {
+                    parsed_vals.push(std::mem::take(&mut current).trim().to_string());
+                }
+                _ => current.push(c),
+            }
         }
         if !current.trim().is_empty() {
             parsed_vals.push(current.trim().to_string());

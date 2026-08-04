@@ -5,7 +5,7 @@ pub struct CompTypesMetadata {
     pub f_blob: Option<Vec<u8>>,
     pub f_date: Option<chrono::NaiveDate>,
     pub f_datetime: Option<chrono::DateTime<chrono::Utc>>,
-    pub f_json: Option<serde_json::Value>,
+    pub f_json: Option<String>,
     pub f_timestamp: Option<chrono::DateTime<chrono::Utc>>,
     pub id: i64,
 }
@@ -55,12 +55,12 @@ impl CompTypesMetadata {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         if let Some(v) = Some(&self.comp_types_id) {
-            if (*v as i64) < 0 {
+            if (*v as i128) < (0 as i128) {
                 errors.push("comp_types_id: minimum value '0' not met".into());
             }
         }
         if let Some(v) = Some(&self.comp_types_id) {
-            if (*v as i64) > 9223372036854775807 {
+            if (*v as i128) > (9223372036854775807 as i128) {
                 errors.push("comp_types_id: maximum value '9223372036854775807' exceeded".into());
             }
         }
@@ -69,13 +69,28 @@ impl CompTypesMetadata {
                 errors.push("f_blob: exceeds max_length 65535".into());
             }
         }
+        #[cfg(feature = "validation")]
+        if let Some(v) = self.f_json.as_ref() {
+            static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+            match re {
+                Some(re) => {
+                    if !re.is_match(v) {
+                        errors.push("f_json: format constraint not met".into());
+                    }
+                }
+                None => {
+                    errors.push("f_json: configured regex is invalid".into());
+                }
+            }
+        }
         if let Some(v) = Some(&self.id) {
-            if (*v as i64) < 0 {
+            if (*v as i128) < (0 as i128) {
                 errors.push("id: minimum value '0' not met".into());
             }
         }
         if let Some(v) = Some(&self.id) {
-            if (*v as i64) > 9223372036854775807 {
+            if (*v as i128) > (9223372036854775807 as i128) {
                 errors.push("id: maximum value '9223372036854775807' exceeded".into());
             }
         }
@@ -415,6 +430,6 @@ pub struct CompTypesMetadataPatch {
     pub f_blob: Option<Option<Vec<u8>>>,
     pub f_date: Option<Option<chrono::NaiveDate>>,
     pub f_datetime: Option<Option<chrono::DateTime<chrono::Utc>>>,
-    pub f_json: Option<Option<serde_json::Value>>,
+    pub f_json: Option<Option<String>>,
     pub f_timestamp: Option<Option<chrono::DateTime<chrono::Utc>>>,
 }

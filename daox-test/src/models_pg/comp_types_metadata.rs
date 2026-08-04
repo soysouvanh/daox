@@ -55,22 +55,22 @@ impl CompTypesMetadata {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         if let Some(v) = Some(&self.comp_types_id) {
-            if (*v as i64) < 0 {
+            if (*v as i128) < (0 as i128) {
                 errors.push("comp_types_id: minimum value '0' not met".into());
             }
         }
         if let Some(v) = Some(&self.comp_types_id) {
-            if (*v as i64) > 9223372036854775807 {
+            if (*v as i128) > (9223372036854775807 as i128) {
                 errors.push("comp_types_id: maximum value '9223372036854775807' exceeded".into());
             }
         }
         if let Some(v) = Some(&self.id) {
-            if (*v as i64) < 0 {
+            if (*v as i128) < (0 as i128) {
                 errors.push("id: minimum value '0' not met".into());
             }
         }
         if let Some(v) = Some(&self.id) {
-            if (*v as i64) > 9223372036854775807 {
+            if (*v as i128) > (9223372036854775807 as i128) {
                 errors.push("id: maximum value '9223372036854775807' exceeded".into());
             }
         }

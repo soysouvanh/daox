@@ -41,12 +41,17 @@ impl ProductMetadata {
         let mut errors = Vec::new();
         #[cfg(feature = "validation")]
         if let Some(v) = self.attributes.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("attributes: format constraint not met".into());
+            static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+            match re {
+                Some(re) => {
+                    if !re.is_match(v) {
+                        errors.push("attributes: format constraint not met".into());
+                    }
+                }
+                None => {
+                    errors.push("attributes: configured regex is invalid".into());
+                }
             }
         }
         if let Some(v) = Some(&self.category) {
@@ -56,12 +61,17 @@ impl ProductMetadata {
         }
         #[cfg(feature = "validation")]
         if let Some(v) = Some(&self.category) {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("category: format constraint not met".into());
+            static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+            match re {
+                Some(re) => {
+                    if !re.is_match(v) {
+                        errors.push("category: format constraint not met".into());
+                    }
+                }
+                None => {
+                    errors.push("category: configured regex is invalid".into());
+                }
             }
         }
         if let Some(v) = Some(&self.id) {
@@ -71,12 +81,17 @@ impl ProductMetadata {
         }
         #[cfg(feature = "validation")]
         if let Some(v) = Some(&self.id) {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("id: format constraint not met".into());
+            static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+            match re {
+                Some(re) => {
+                    if !re.is_match(v) {
+                        errors.push("id: format constraint not met".into());
+                    }
+                }
+                None => {
+                    errors.push("id: configured regex is invalid".into());
+                }
             }
         }
         if errors.is_empty() {

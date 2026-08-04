@@ -3,7 +3,7 @@ services:
   db:
     image: mariadb:10.11
     environment:
-      MARIADB_ROOT_PASSWORD: root
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?MARIADB_ROOT_PASSWORD is required}
       MARIADB_DATABASE: daox_test
     ports:
       - "127.0.0.1:3307:3306"
@@ -13,8 +13,8 @@ services:
   pg:
     image: postgres:15
     environment:
-      POSTGRES_USER: root
-      POSTGRES_PASSWORD: root
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: daox_test
     ports:
       - "127.0.0.1:5433:5432"

@@ -35,32 +35,32 @@ impl OrderItems {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         if let Some(v) = Some(&self.order_id) {
-            if (*v as i64) < 0 {
+            if (*v as i128) < (0 as i128) {
                 errors.push("order_id: minimum value '0' not met".into());
             }
         }
         if let Some(v) = Some(&self.order_id) {
-            if (*v as i64) > 9223372036854775807 {
+            if (*v as i128) > (9223372036854775807 as i128) {
                 errors.push("order_id: maximum value '9223372036854775807' exceeded".into());
             }
         }
         if let Some(v) = Some(&self.product_id) {
-            if (*v as i64) < 0 {
+            if (*v as i128) < (0 as i128) {
                 errors.push("product_id: minimum value '0' not met".into());
             }
         }
         if let Some(v) = Some(&self.product_id) {
-            if (*v as i64) > 9223372036854775807 {
+            if (*v as i128) > (9223372036854775807 as i128) {
                 errors.push("product_id: maximum value '9223372036854775807' exceeded".into());
             }
         }
         if let Some(v) = Some(&self.quantity) {
-            if (*v as i64) < 0 {
+            if (*v as i128) < (0 as i128) {
                 errors.push("quantity: minimum value '0' not met".into());
             }
         }
         if let Some(v) = Some(&self.quantity) {
-            if (*v as i64) > 2147483647 {
+            if (*v as i128) > (2147483647 as i128) {
                 errors.push("quantity: maximum value '2147483647' exceeded".into());
             }
         }

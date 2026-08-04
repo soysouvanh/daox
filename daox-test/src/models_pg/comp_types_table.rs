@@ -60,23 +60,28 @@ impl CompTypesTable {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         if let Some(v) = self.f_int.as_ref() {
-            if (*v as i64) < 0 {
+            if (*v as i128) < (0 as i128) {
                 errors.push("f_int: minimum value '0' not met".into());
             }
         }
         if let Some(v) = self.f_int.as_ref() {
-            if (*v as i64) > 2147483647 {
+            if (*v as i128) > (2147483647 as i128) {
                 errors.push("f_int: maximum value '2147483647' exceeded".into());
             }
         }
         #[cfg(feature = "validation")]
         if let Some(v) = self.f_text.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("f_text: format constraint not met".into());
+            static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+            match re {
+                Some(re) => {
+                    if !re.is_match(v) {
+                        errors.push("f_text: format constraint not met".into());
+                    }
+                }
+                None => {
+                    errors.push("f_text: configured regex is invalid".into());
+                }
             }
         }
         if let Some(v) = self.f_varchar.as_ref() {
@@ -86,21 +91,26 @@ impl CompTypesTable {
         }
         #[cfg(feature = "validation")]
         if let Some(v) = self.f_varchar.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("f_varchar: format constraint not met".into());
+            static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+            match re {
+                Some(re) => {
+                    if !re.is_match(v) {
+                        errors.push("f_varchar: format constraint not met".into());
+                    }
+                }
+                None => {
+                    errors.push("f_varchar: configured regex is invalid".into());
+                }
             }
         }
         if let Some(v) = Some(&self.id) {
-            if (*v as i64) < 0 {
+            if (*v as i128) < (0 as i128) {
                 errors.push("id: minimum value '0' not met".into());
             }
         }
         if let Some(v) = Some(&self.id) {
-            if (*v as i64) > 9223372036854775807 {
+            if (*v as i128) > (9223372036854775807 as i128) {
                 errors.push("id: maximum value '9223372036854775807' exceeded".into());
             }
         }

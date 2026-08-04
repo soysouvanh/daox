@@ -41,43 +41,60 @@ impl ActiveUsers {
         let mut errors = Vec::new();
         #[cfg(feature = "validation")]
         if let Some(v) = self.email.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
             let re = RE.get_or_init(|| {
                 regex::Regex::new("^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$")
-                    .expect("Invalid regex in TOML")
+                    .ok()
             });
-            if !re.is_match(v) {
-                errors.push("email: format constraint not met".into());
+            match re {
+                Some(re) => {
+                    if !re.is_match(v) {
+                        errors.push("email: format constraint not met".into());
+                    }
+                }
+                None => {
+                    errors.push("email: configured regex is invalid".into());
+                }
             }
         }
         #[cfg(feature = "validation")]
         if let Some(v) = self.first_name.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("first_name: format constraint not met".into());
+            static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+            match re {
+                Some(re) => {
+                    if !re.is_match(v) {
+                        errors.push("first_name: format constraint not met".into());
+                    }
+                }
+                None => {
+                    errors.push("first_name: configured regex is invalid".into());
+                }
             }
         }
         if let Some(v) = self.id.as_ref() {
-            if (*v as i64) < 0 {
+            if (*v as i128) < (0 as i128) {
                 errors.push("id: minimum value '0' not met".into());
             }
         }
         if let Some(v) = self.id.as_ref() {
-            if (*v as i64) > 2147483647 {
+            if (*v as i128) > (2147483647 as i128) {
                 errors.push("id: maximum value '2147483647' exceeded".into());
             }
         }
         #[cfg(feature = "validation")]
         if let Some(v) = self.last_name.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("last_name: format constraint not met".into());
+            static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+            let re = RE.get_or_init(|| regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").ok());
+            match re {
+                Some(re) => {
+                    if !re.is_match(v) {
+                        errors.push("last_name: format constraint not met".into());
+                    }
+                }
+                None => {
+                    errors.push("last_name: configured regex is invalid".into());
+                }
             }
         }
         if errors.is_empty() {
