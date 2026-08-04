@@ -118,6 +118,10 @@ impl CompTypesTable {
     /// which may take a long time on large tables (e.g. >10M rows).
     /// Consider caching this value or using an approximate row count from
     /// `information_schema.tables` or `pg_class` if exact precision is not required.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `approximate_count` instead to prevent full table scans."
+    )]
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
         executor: E,
     ) -> sqlx::Result<u64> {
@@ -139,6 +143,10 @@ impl CompTypesTable {
     /// Streams rows from the table, ordered by the primary key.
     /// **⚠️ Performance Warning:** Streaming a whole table without a limit or timeout can cause connection pool starvation.
     /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use cursor-based pagination instead to prevent pool starvation."
+    )]
     pub fn stream_all<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres> + 'e>(
         executor: E,
         limit: i64,
@@ -262,8 +270,6 @@ impl CompTypesTable {
                     for c in v.chars() {
                         if c == '"' {
                             payload.push_str("\"\"");
-                        } else if c == '\\' {
-                            payload.push_str("\\\\");
                         } else {
                             payload.push(c);
                         }
@@ -276,8 +282,6 @@ impl CompTypesTable {
                     for c in v.chars() {
                         if c == '"' {
                             payload.push_str("\"\"");
-                        } else if c == '\\' {
-                            payload.push_str("\\\\");
                         } else {
                             payload.push(c);
                         }

@@ -129,6 +129,10 @@ impl Users {
     /// which may take a long time on large tables (e.g. >10M rows).
     /// Consider caching this value or using an approximate row count from
     /// `information_schema.tables` or `pg_class` if exact precision is not required.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `approximate_count` instead to prevent full table scans."
+    )]
     pub async fn count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         executor: E,
     ) -> sqlx::Result<u64> {
@@ -153,6 +157,10 @@ impl Users {
     /// Streams rows from the table, ordered by the primary key.
     /// **⚠️ Performance Warning:** Streaming a whole table without a limit or timeout can cause connection pool starvation.
     /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use cursor-based pagination instead to prevent pool starvation."
+    )]
     pub fn stream_all<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite> + 'e>(
         executor: E,
         limit: i64,
@@ -458,6 +466,41 @@ impl Users {
         Ok(result.rows_affected())
     }
 
+    pub async fn get_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        email: &str,
+    ) -> sqlx::Result<Option<Self>> {
+        let query = r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM `users` WHERE `email` = ?"#;
+        sqlx::query_as::<_, Self>(query)
+            .bind(email)
+            .fetch_optional(executor)
+            .await
+    }
+
+    pub async fn exists_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        email: &str,
+    ) -> sqlx::Result<bool> {
+        let query = r#"SELECT 1 FROM `users` WHERE `email` = ? LIMIT 1"#;
+        let exists: Option<(i32,)> = sqlx::query_as(query)
+            .bind(email)
+            .fetch_optional(executor)
+            .await?;
+        Ok(exists.is_some())
+    }
+
+    pub async fn delete_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        email: &str,
+    ) -> sqlx::Result<u64> {
+        let query = r#"DELETE FROM `users` WHERE `email` = ?"#;
+        let result = sqlx::query::<sqlx::Sqlite>(query)
+            .bind(email)
+            .execute(executor)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
     pub async fn list_by_last_name_and_first_name<
         'e,
         E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
@@ -480,6 +523,10 @@ impl Users {
     /// Streams rows from the table, filtered by last_name_and_first_name.
     /// **⚠️ Performance Warning:** Unbounded streaming is potentially dangerous.
     /// A `limit` parameter is now mandatory to prevent connection pool starvation.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use cursor-based pagination instead to prevent pool starvation."
+    )]
     pub fn stream_by_last_name_and_first_name<
         'e,
         E: sqlx::Executor<'e, Database = sqlx::Sqlite> + 'e,
@@ -527,41 +574,6 @@ impl Users {
         let result = sqlx::query::<sqlx::Sqlite>(query)
             .bind(last_name)
             .bind(first_name)
-            .execute(executor)
-            .await?;
-        Ok(result.rows_affected())
-    }
-
-    pub async fn get_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
-        executor: E,
-        email: &str,
-    ) -> sqlx::Result<Option<Self>> {
-        let query = r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM `users` WHERE `email` = ?"#;
-        sqlx::query_as::<_, Self>(query)
-            .bind(email)
-            .fetch_optional(executor)
-            .await
-    }
-
-    pub async fn exists_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
-        executor: E,
-        email: &str,
-    ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM `users` WHERE `email` = ? LIMIT 1"#;
-        let exists: Option<(i32,)> = sqlx::query_as(query)
-            .bind(email)
-            .fetch_optional(executor)
-            .await?;
-        Ok(exists.is_some())
-    }
-
-    pub async fn delete_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
-        executor: E,
-        email: &str,
-    ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM `users` WHERE `email` = ?"#;
-        let result = sqlx::query::<sqlx::Sqlite>(query)
-            .bind(email)
             .execute(executor)
             .await?;
         Ok(result.rows_affected())

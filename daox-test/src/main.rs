@@ -90,6 +90,7 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
     tx.commit().await.unwrap();
 
     // --- COUNT ---
+    #[allow(deprecated)]
     let count = Users::count(&pool).await.unwrap();
     assert!(count >= 51);
 
@@ -100,6 +101,7 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
     assert!(cursor_page.len() <= 5);
 
     // --- STREAM_ALL ---
+    #[allow(deprecated)]
     {
         let mut stream = Users::stream_all(&pool, 1000);
         let mut stream_count = 0;
@@ -312,6 +314,7 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
     tx.commit().await.unwrap();
 
     // --- COUNT ---
+    #[allow(deprecated)]
     let count = Users::count(&pool).await.unwrap();
     assert!(count >= 51);
 
@@ -322,6 +325,7 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
     assert!(cursor_page.len() <= 5);
 
     // --- STREAM_ALL ---
+    #[allow(deprecated)]
     {
         let mut stream = Users::stream_all(&pool, 1000);
         let mut stream_count = 0;
@@ -391,11 +395,7 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
     assert_eq!(check_partial.status, "partial");
 
     // --- INDEX METHODS ---
-    assert!(
-        Users::exists_by_email(&pool, "bob@daox.dev")
-            .await
-            .unwrap()
-    );
+    assert!(Users::exists_by_email(&pool, "bob@daox.dev").await.unwrap());
     assert!(
         Users::get_by_email(&pool, "bob@daox.dev")
             .await
@@ -414,9 +414,7 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
     Users::delete_by_last_name_and_first_name(&pool, "Batch", "Worker2")
         .await
         .unwrap();
-    Users::delete_by_email(&pool, "bob@daox.dev")
-        .await
-        .unwrap();
+    Users::delete_by_email(&pool, "bob@daox.dev").await.unwrap();
 
     // --- DELETE_BY_ID ---
     Users::delete_by_id(&pool, user1_id as i64).await.unwrap();
@@ -537,6 +535,7 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
     tx.commit().await.unwrap();
 
     // --- COUNT ---
+    #[allow(deprecated)]
     let count = Users::count(&pool).await.unwrap();
     assert!(count >= 51);
 
@@ -547,6 +546,7 @@ async fn run_sqlite() -> Result<(), sqlx::Error> {
     assert!(cursor_page.len() <= 5);
 
     // --- STREAM_ALL ---
+    #[allow(deprecated)]
     {
         let mut stream = Users::stream_all(&pool, 1000);
         let mut stream_count = 0;
