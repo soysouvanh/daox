@@ -83,6 +83,10 @@ impl CompTypesViewOrderBy {
 impl CompTypesView {
     #[allow(unused_comparisons)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
+        #[cfg(not(feature = "validation"))]
+        {
+            // Formats validation is disabled
+        }
         let mut errors = Vec::new();
         if let Some(v) = self.f_blob.as_ref() {
             if v.len() > 65535 {

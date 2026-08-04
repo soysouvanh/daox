@@ -33,6 +33,10 @@ impl UserRolesOrderBy {
 impl UserRoles {
     #[allow(unused_comparisons)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
+        #[cfg(not(feature = "validation"))]
+        {
+            // Formats validation is disabled
+        }
         let mut errors = Vec::new();
         if let Some(v) = Some(&self.role_name) {
             if v.len() < 1 {
@@ -154,7 +158,7 @@ impl UserRoles {
         Ok(exists.is_some())
     }
 
-    pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
+    pub async fn insert_unchecked<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
@@ -169,12 +173,14 @@ impl UserRoles {
         Ok(result.rows_affected())
     }
 
-    pub async fn insert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
+    pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         &self,
         executor: E,
-    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-        self.validate().map_err(|e| e.join(", "))?;
-        self.insert(executor).await.map_err(|e| e.into())
+    ) -> sqlx::Result<u64> {
+        if let Err(e) = self.validate() {
+            return Err(sqlx::Error::Protocol(e.join(", ").into()));
+        }
+        self.insert_unchecked(executor).await
     }
 
     /// Inserts a batch of records.
@@ -203,7 +209,7 @@ impl UserRoles {
         Ok(total_affected)
     }
 
-    pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
+    pub async fn upsert_unchecked<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
@@ -217,12 +223,14 @@ impl UserRoles {
         Ok(result.rows_affected())
     }
 
-    pub async fn upsert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
+    pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         &self,
         executor: E,
-    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-        self.validate().map_err(|e| e.join(", "))?;
-        self.upsert(executor).await.map_err(|e| e.into())
+    ) -> sqlx::Result<u64> {
+        if let Err(e) = self.validate() {
+            return Err(sqlx::Error::Protocol(e.join(", ").into()));
+        }
+        self.upsert_unchecked(executor).await
     }
 
     /// Upserts a batch of records.
@@ -252,7 +260,7 @@ impl UserRoles {
         Ok(total_affected)
     }
 
-    pub async fn update_by_role_name_and_user_id<
+    pub async fn update_unchecked_by_role_name_and_user_id<
         'e,
         E: sqlx::Executor<'e, Database = sqlx::MySql>,
     >(
@@ -269,17 +277,18 @@ impl UserRoles {
         Ok(result.rows_affected())
     }
 
-    pub async fn update_validated_by_role_name_and_user_id<
+    pub async fn update_by_role_name_and_user_id<
         'e,
         E: sqlx::Executor<'e, Database = sqlx::MySql>,
     >(
         &self,
         executor: E,
-    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-        self.validate().map_err(|e| e.join(", "))?;
-        self.update_by_role_name_and_user_id(executor)
+    ) -> sqlx::Result<u64> {
+        if let Err(e) = self.validate() {
+            return Err(sqlx::Error::Protocol(e.join(", ").into()));
+        }
+        self.update_unchecked_by_role_name_and_user_id(executor)
             .await
-            .map_err(|e| e.into())
     }
 
     pub async fn delete_by_role_name_and_user_id<
@@ -328,53 +337,6 @@ impl UserRoles {
         qb.push(" AND `user_id` = ");
         qb.push_bind(user_id);
         let result = qb.build().execute(executor).await?;
-        Ok(result.rows_affected())
-    }
-
-    pub async fn get_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
-        executor: E,
-        user_id: i64,
-        role_name: &str,
-    ) -> sqlx::Result<Option<Self>> {
-        let query = r#"SELECT `assigned_at`, `role_name`, `user_id` FROM `user_roles` WHERE `user_id` = ? AND `role_name` = ?"#;
-        sqlx::query_as::<_, Self>(query)
-            .bind(user_id)
-            .bind(role_name)
-            .fetch_optional(executor)
-            .await
-    }
-
-    pub async fn exists_by_user_id_and_role_name<
-        'e,
-        E: sqlx::Executor<'e, Database = sqlx::MySql>,
-    >(
-        executor: E,
-        user_id: i64,
-        role_name: &str,
-    ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM `user_roles` WHERE `user_id` = ? AND `role_name` = ? LIMIT 1"#;
-        let exists: Option<(i32,)> = sqlx::query_as(query)
-            .bind(user_id)
-            .bind(role_name)
-            .fetch_optional(executor)
-            .await?;
-        Ok(exists.is_some())
-    }
-
-    pub async fn delete_by_user_id_and_role_name<
-        'e,
-        E: sqlx::Executor<'e, Database = sqlx::MySql>,
-    >(
-        executor: E,
-        user_id: i64,
-        role_name: &str,
-    ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM `user_roles` WHERE `user_id` = ? AND `role_name` = ?"#;
-        let result = sqlx::query::<sqlx::MySql>(query)
-            .bind(user_id)
-            .bind(role_name)
-            .execute(executor)
-            .await?;
         Ok(result.rows_affected())
     }
 
@@ -431,6 +393,53 @@ impl UserRoles {
         let query = r#"DELETE FROM `user_roles` WHERE `user_id` = ?"#;
         let result = sqlx::query::<sqlx::MySql>(query)
             .bind(user_id)
+            .execute(executor)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn get_by_user_id_and_role_name<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
+        executor: E,
+        user_id: i64,
+        role_name: &str,
+    ) -> sqlx::Result<Option<Self>> {
+        let query = r#"SELECT `assigned_at`, `role_name`, `user_id` FROM `user_roles` WHERE `user_id` = ? AND `role_name` = ?"#;
+        sqlx::query_as::<_, Self>(query)
+            .bind(user_id)
+            .bind(role_name)
+            .fetch_optional(executor)
+            .await
+    }
+
+    pub async fn exists_by_user_id_and_role_name<
+        'e,
+        E: sqlx::Executor<'e, Database = sqlx::MySql>,
+    >(
+        executor: E,
+        user_id: i64,
+        role_name: &str,
+    ) -> sqlx::Result<bool> {
+        let query = r#"SELECT 1 FROM `user_roles` WHERE `user_id` = ? AND `role_name` = ? LIMIT 1"#;
+        let exists: Option<(i32,)> = sqlx::query_as(query)
+            .bind(user_id)
+            .bind(role_name)
+            .fetch_optional(executor)
+            .await?;
+        Ok(exists.is_some())
+    }
+
+    pub async fn delete_by_user_id_and_role_name<
+        'e,
+        E: sqlx::Executor<'e, Database = sqlx::MySql>,
+    >(
+        executor: E,
+        user_id: i64,
+        role_name: &str,
+    ) -> sqlx::Result<u64> {
+        let query = r#"DELETE FROM `user_roles` WHERE `user_id` = ? AND `role_name` = ?"#;
+        let result = sqlx::query::<sqlx::MySql>(query)
+            .bind(user_id)
+            .bind(role_name)
             .execute(executor)
             .await?;
         Ok(result.rows_affected())

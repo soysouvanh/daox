@@ -249,6 +249,34 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
         .unwrap();
     assert!(exists_commit);
 
+    // --- BYTEA COPY ROUNDTRIP TEST ---
+    {
+        sqlx::query("TRUNCATE TABLE product_metadata CASCADE")
+            .execute(&pool)
+            .await?;
+        let test_payload = vec![0x00, 0x01, 0x02, 0xFF, 0xFE, 0x0A, 0x0D, 0x22, 0x27, 0x5C];
+        let pm = models_pg::ProductMetadata {
+            id: "9999".into(),
+            category: "test".into(),
+            attributes: Some(serde_json::json!({"test": true})),
+            raw_data: Some(test_payload.clone()),
+        };
+        let mut tx = pool.begin().await?;
+        models_pg::ProductMetadata::insert_batch(&mut tx, &[pm.clone()])
+            .await
+            .unwrap();
+        tx.commit().await?;
+
+        let fetched = models_pg::ProductMetadata::get_by_id(&pool, "9999")
+            .await?
+            .unwrap();
+        assert_eq!(
+            fetched.raw_data.unwrap(),
+            test_payload,
+            "BYTEA COPY roundtrip failed!"
+        );
+    }
+
     println!("🎉 ALL POSTGRESQL TESTS PASSED! Daox is production-ready.");
     Ok(())
 }

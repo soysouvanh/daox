@@ -48,6 +48,10 @@ impl UsersOrderBy {
 impl Users {
     #[allow(unused_comparisons)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
+        #[cfg(not(feature = "validation"))]
+        {
+            // Formats validation is disabled
+        }
         let mut errors = Vec::new();
         if let Some(v) = Some(&self.email) {
             if v.len() < 1 {
@@ -229,7 +233,7 @@ impl Users {
             .await
     }
 
-    pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+    pub async fn insert_unchecked<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
@@ -245,12 +249,14 @@ impl Users {
         Ok(result.last_insert_rowid() as u64)
     }
 
-    pub async fn insert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+    pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         &self,
         executor: E,
-    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-        self.validate().map_err(|e| e.join(", "))?;
-        self.insert(executor).await.map_err(|e| e.into())
+    ) -> sqlx::Result<u64> {
+        if let Err(e) = self.validate() {
+            return Err(sqlx::Error::Protocol(e.join(", ").into()));
+        }
+        self.insert_unchecked(executor).await
     }
 
     /// Inserts a batch of records.
@@ -281,7 +287,7 @@ impl Users {
         Ok(total_affected)
     }
 
-    pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+    pub async fn upsert_unchecked<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
@@ -297,12 +303,14 @@ impl Users {
         Ok(result.rows_affected())
     }
 
-    pub async fn upsert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+    pub async fn upsert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         &self,
         executor: E,
-    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-        self.validate().map_err(|e| e.join(", "))?;
-        self.upsert(executor).await.map_err(|e| e.into())
+    ) -> sqlx::Result<u64> {
+        if let Err(e) = self.validate() {
+            return Err(sqlx::Error::Protocol(e.join(", ").into()));
+        }
+        self.upsert_unchecked(executor).await
     }
 
     /// Upserts a batch of records.
@@ -334,7 +342,7 @@ impl Users {
         Ok(total_affected)
     }
 
-    pub async fn update_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+    pub async fn update_unchecked_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
@@ -350,12 +358,14 @@ impl Users {
         Ok(result.rows_affected())
     }
 
-    pub async fn update_validated_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+    pub async fn update_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         &self,
         executor: E,
-    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-        self.validate().map_err(|e| e.join(", "))?;
-        self.update_by_id(executor).await.map_err(|e| e.into())
+    ) -> sqlx::Result<u64> {
+        if let Err(e) = self.validate() {
+            return Err(sqlx::Error::Protocol(e.join(", ").into()));
+        }
+        self.update_unchecked_by_id(executor).await
     }
 
     pub async fn delete_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
@@ -452,41 +462,6 @@ impl Users {
         Ok(result.rows_affected())
     }
 
-    pub async fn get_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
-        executor: E,
-        email: &str,
-    ) -> sqlx::Result<Option<Self>> {
-        let query = r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM `users` WHERE `email` = ?"#;
-        sqlx::query_as::<_, Self>(query)
-            .bind(email)
-            .fetch_optional(executor)
-            .await
-    }
-
-    pub async fn exists_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
-        executor: E,
-        email: &str,
-    ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM `users` WHERE `email` = ? LIMIT 1"#;
-        let exists: Option<(i32,)> = sqlx::query_as(query)
-            .bind(email)
-            .fetch_optional(executor)
-            .await?;
-        Ok(exists.is_some())
-    }
-
-    pub async fn delete_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
-        executor: E,
-        email: &str,
-    ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM `users` WHERE `email` = ?"#;
-        let result = sqlx::query::<sqlx::Sqlite>(query)
-            .bind(email)
-            .execute(executor)
-            .await?;
-        Ok(result.rows_affected())
-    }
-
     pub async fn list_by_last_name_and_first_name<
         'e,
         E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
@@ -560,6 +535,41 @@ impl Users {
         let result = sqlx::query::<sqlx::Sqlite>(query)
             .bind(last_name)
             .bind(first_name)
+            .execute(executor)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn get_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        email: &str,
+    ) -> sqlx::Result<Option<Self>> {
+        let query = r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM `users` WHERE `email` = ?"#;
+        sqlx::query_as::<_, Self>(query)
+            .bind(email)
+            .fetch_optional(executor)
+            .await
+    }
+
+    pub async fn exists_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        email: &str,
+    ) -> sqlx::Result<bool> {
+        let query = r#"SELECT 1 FROM `users` WHERE `email` = ? LIMIT 1"#;
+        let exists: Option<(i32,)> = sqlx::query_as(query)
+            .bind(email)
+            .fetch_optional(executor)
+            .await?;
+        Ok(exists.is_some())
+    }
+
+    pub async fn delete_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        email: &str,
+    ) -> sqlx::Result<u64> {
+        let query = r#"DELETE FROM `users` WHERE `email` = ?"#;
+        let result = sqlx::query::<sqlx::Sqlite>(query)
+            .bind(email)
             .execute(executor)
             .await?;
         Ok(result.rows_affected())

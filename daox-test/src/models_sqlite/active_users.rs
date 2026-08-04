@@ -38,6 +38,10 @@ impl ActiveUsersOrderBy {
 impl ActiveUsers {
     #[allow(unused_comparisons)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
+        #[cfg(not(feature = "validation"))]
+        {
+            // Formats validation is disabled
+        }
         let mut errors = Vec::new();
         #[cfg(feature = "validation")]
         if let Some(v) = self.email.as_ref() {

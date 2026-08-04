@@ -33,6 +33,10 @@ impl UserRolesOrderBy {
 impl UserRoles {
     #[allow(unused_comparisons)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
+        #[cfg(not(feature = "validation"))]
+        {
+            // Formats validation is disabled
+        }
         let mut errors = Vec::new();
         if let Some(v) = Some(&self.role_name) {
             if v.len() < 1 {
@@ -119,7 +123,7 @@ impl UserRoles {
         sqlx::query_as::<_, Self>(query).bind(limit).fetch(executor)
     }
 
-    pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+    pub async fn insert_unchecked<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         &self,
         executor: E,
     ) -> sqlx::Result<u64> {
@@ -134,12 +138,14 @@ impl UserRoles {
         Ok(result.rows_affected())
     }
 
-    pub async fn insert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+    pub async fn insert<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         &self,
         executor: E,
-    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-        self.validate().map_err(|e| e.join(", "))?;
-        self.insert(executor).await.map_err(|e| e.into())
+    ) -> sqlx::Result<u64> {
+        if let Err(e) = self.validate() {
+            return Err(sqlx::Error::Protocol(e.join(", ").into()));
+        }
+        self.insert_unchecked(executor).await
     }
 
     /// Inserts a batch of records.

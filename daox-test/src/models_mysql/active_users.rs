@@ -38,6 +38,10 @@ impl ActiveUsersOrderBy {
 impl ActiveUsers {
     #[allow(unused_comparisons)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
+        #[cfg(not(feature = "validation"))]
+        {
+            // Formats validation is disabled
+        }
         let mut errors = Vec::new();
         if let Some(v) = Some(&self.email) {
             if v.len() < 1 {

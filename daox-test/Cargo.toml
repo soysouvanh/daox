@@ -9,6 +9,7 @@ repository.workspace = true
 publish = false
 
 [features]
+default = ["validation"]
 validation = ["regex"]
 
 [dependencies]
@@ -40,3 +41,4 @@ sqlx = { version = "0.9", features = ["sqlite", "runtime-tokio", "tls-rustls"] }
 
 [dev-dependencies]
 regex = "1"
+toml = "0.8"

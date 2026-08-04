@@ -38,6 +38,10 @@ impl CompTypesActiveViewOrderBy {
 impl CompTypesActiveView {
     #[allow(unused_comparisons)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
+        #[cfg(not(feature = "validation"))]
+        {
+            // Formats validation is disabled
+        }
         let mut errors = Vec::new();
         if let Some(v) = self.f_int.as_ref() {
             if (*v as i128) < (0 as i128) {
