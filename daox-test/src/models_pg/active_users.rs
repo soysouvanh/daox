@@ -44,30 +44,9 @@ impl ActiveUsers {
                 errors.push("email: exceeds max_length 255".into());
             }
         }
-        #[cfg(feature = "validation")]
-        if let Some(v) = self.email.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$")
-                    .expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("email: format constraint not met".into());
-            }
-        }
         if let Some(v) = self.first_name.as_ref() {
             if v.len() > 100 {
                 errors.push("first_name: exceeds max_length 100".into());
-            }
-        }
-        #[cfg(feature = "validation")]
-        if let Some(v) = self.first_name.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("first_name: format constraint not met".into());
             }
         }
         if let Some(v) = self.id.as_ref() {
@@ -83,16 +62,6 @@ impl ActiveUsers {
         if let Some(v) = self.last_name.as_ref() {
             if v.len() > 100 {
                 errors.push("last_name: exceeds max_length 100".into());
-            }
-        }
-        #[cfg(feature = "validation")]
-        if let Some(v) = self.last_name.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("last_name: format constraint not met".into());
             }
         }
         if errors.is_empty() {
@@ -133,7 +102,7 @@ impl ActiveUsers {
 
     /// Streams rows from the table, ordered by the primary key.
     /// **⚠️ Performance Warning:** Streaming a whole table without a limit or timeout can cause connection pool starvation.
-    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS.
+    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS. Timeouts are managed by the underlying sqlx `AnyPoolOptions` settings.
     #[deprecated(
         since = "0.2.0",
         note = "Use cursor-based pagination instead to prevent pool starvation."

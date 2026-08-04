@@ -18,18 +18,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=src/models_sqlite/overrides");
 
     // Database connection URLs
-    let mysql_url = std::env::var("DATABASE_URL_MYSQL").map_err(|e| {
-        format!(
-            "DATABASE_URL_MYSQL is required for Daox code generation: {}",
-            e
-        )
-    })?;
-    let pg_url = std::env::var("DATABASE_URL_PG").map_err(|e| {
-        format!(
-            "DATABASE_URL_PG is required for Daox code generation: {}",
-            e
-        )
-    })?;
+    let mysql_url = std::env::var("DATABASE_URL_MYSQL")
+        .unwrap_or_else(|_| "mysql://root:root@127.0.0.1:3307/daox_test".to_string());
+    let pg_url = std::env::var("DATABASE_URL_PG")
+        .unwrap_or_else(|_| "postgres://root:root@127.0.0.1:5433/daox_test".to_string());
 
     let mysql_out = "src/models_mysql";
     let pg_out = "src/models_pg";
@@ -70,45 +62,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize SQLite schema.
     let sqlite_schema: &'static str = include_str!("../init_sqlite.sql");
-    let mut queries = Vec::new();
-    let mut in_string = false;
-    let mut in_line_comment = false;
-    let mut start = 0;
-    for (i, c) in sqlite_schema.char_indices() {
-        if in_line_comment {
-            if c == '\n' {
-                in_line_comment = false;
-            }
-            continue;
-        }
-
-        if !in_string && c == '-' && sqlite_schema[i..].starts_with("--") {
-            in_line_comment = true;
-            continue;
-        }
-
-        if c == '\'' {
-            in_string = !in_string;
-        }
-
-        if c == ';' && !in_string {
-            let q = sqlite_schema[start..i].trim();
-            if !q.is_empty() {
-                queries.push(q);
-            }
-            start = i + 1;
-        }
-    }
-    let q = sqlite_schema[start..].trim();
-    if !q.is_empty() {
-        queries.push(q);
-    }
-
-    for (i, q) in queries.into_iter().enumerate() {
-        sqlx::Executor::execute(&sqlite_pool, q)
-            .await
-            .map_err(|e| format!("Query {} failed: {}\n{}", i, e, q))?;
-    }
+    sqlx::Executor::execute(&sqlite_pool, sqlite_schema)
+        .await
+        .map_err(|e| format!("SQLite init failed: {}", e))?;
 
     let sqlite_out = "src/models_sqlite";
     if !Path::new(sqlite_out).exists() {

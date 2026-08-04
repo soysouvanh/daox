@@ -106,7 +106,7 @@ impl CompTypesMetadata {
     }
 
     /// Returns an approximate total number of rows in the table using database statistics (O(1)).
-    /// This is extremely fast for huge tables but the number may be slightly outdated.
+    /// WARNING (MySQL): For InnoDB tables, this value is an estimate and can vary significantly from the actual count.
     pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         executor: E,
     ) -> sqlx::Result<u64> {
@@ -117,7 +117,7 @@ impl CompTypesMetadata {
 
     /// Streams rows from the table, ordered by the primary key.
     /// **⚠️ Performance Warning:** Streaming a whole table without a limit or timeout can cause connection pool starvation.
-    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS.
+    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS. Timeouts are managed by the underlying sqlx `AnyPoolOptions` settings.
     #[deprecated(
         since = "0.2.0",
         note = "Use cursor-based pagination instead to prevent pool starvation."
@@ -185,6 +185,14 @@ impl CompTypesMetadata {
         Ok(result.last_insert_id())
     }
 
+    pub async fn insert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.insert(executor).await.map_err(|e| e.into())
+    }
+
     /// Inserts a batch of records.
     /// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
     pub async fn insert_batch<'e>(
@@ -229,6 +237,14 @@ impl CompTypesMetadata {
             .execute(executor)
             .await?;
         Ok(result.rows_affected())
+    }
+
+    pub async fn upsert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.upsert(executor).await.map_err(|e| e.into())
     }
 
     /// Upserts a batch of records.
@@ -276,6 +292,14 @@ impl CompTypesMetadata {
         query = query.bind(&self.id);
         let result = query.execute(executor).await?;
         Ok(result.rows_affected())
+    }
+
+    pub async fn update_validated_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.update_by_id(executor).await.map_err(|e| e.into())
     }
 
     pub async fn delete_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
@@ -522,7 +546,7 @@ impl CompTypesMetadata {
             63 => {
                 r#"UPDATE `comp_types_metadata` SET `comp_types_id` = ?, `f_blob` = ?, `f_date` = ?, `f_datetime` = ?, `f_json` = ?, `f_timestamp` = ? WHERE `id` = ?"#
             }
-            _ => unreachable!(),
+            _ => return Err(sqlx::Error::Protocol("invalid patch mask".into())),
         };
 
         let mut query = sqlx::query::<sqlx::MySql>(query_str);

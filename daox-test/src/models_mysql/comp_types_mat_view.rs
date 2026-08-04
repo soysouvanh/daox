@@ -104,29 +104,9 @@ impl CompTypesMatView {
                 errors.push("f_text: exceeds max_length 65535".into());
             }
         }
-        #[cfg(feature = "validation")]
-        if let Some(v) = self.f_text.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("f_text: format constraint not met".into());
-            }
-        }
         if let Some(v) = self.f_varchar.as_ref() {
             if v.len() > 255 {
                 errors.push("f_varchar: exceeds max_length 255".into());
-            }
-        }
-        #[cfg(feature = "validation")]
-        if let Some(v) = self.f_varchar.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("f_varchar: format constraint not met".into());
             }
         }
         if let Some(v) = Some(&self.id) {
@@ -166,7 +146,7 @@ impl CompTypesMatView {
     }
 
     /// Returns an approximate total number of rows in the table using database statistics (O(1)).
-    /// This is extremely fast for huge tables but the number may be slightly outdated.
+    /// WARNING (MySQL): For InnoDB tables, this value is an estimate and can vary significantly from the actual count.
     pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         executor: E,
     ) -> sqlx::Result<u64> {
@@ -177,7 +157,7 @@ impl CompTypesMatView {
 
     /// Streams rows from the table, ordered by the primary key.
     /// **⚠️ Performance Warning:** Streaming a whole table without a limit or timeout can cause connection pool starvation.
-    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS.
+    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS. Timeouts are managed by the underlying sqlx `AnyPoolOptions` settings.
     #[deprecated(
         since = "0.2.0",
         note = "Use cursor-based pagination instead to prevent pool starvation."
@@ -213,6 +193,14 @@ impl CompTypesMatView {
             .execute(executor)
             .await?;
         Ok(result.rows_affected())
+    }
+
+    pub async fn insert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.insert(executor).await.map_err(|e| e.into())
     }
 
     /// Inserts a batch of records.

@@ -28,7 +28,7 @@ value = 9223372036854775807
 message = "schema.max_value.message|9223372036854775807"
 
 [format]
-value = '^[0-9]{1,19}$'
+value = ""
 message = "schema.format.message"
 
 [is_primary_key]

@@ -27,9 +27,11 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
     use futures::StreamExt;
     use models_pg::{OrderItems, Users};
 
+    let pg_url = env::var("DATABASE_URL_PG")
+        .unwrap_or_else(|_| "postgres://user:password@localhost:5433/daox_test".into());
     let pool = PgPoolOptions::new()
         .max_connections(5)
-        .connect("postgres://root:root@localhost:5433/daox_test")
+        .connect(&pg_url)
         .await?;
 
     println!("🐘 POSTGRESQL DEMONSTRATION (pure sqlx, zero framework)");
@@ -253,9 +255,11 @@ async fn run_mysql() -> Result<(), sqlx::Error> {
     use futures::StreamExt;
     use models_mysql::{OrderItems, Users};
 
+    let mysql_url = env::var("DATABASE_URL_MYSQL")
+        .unwrap_or_else(|_| "mysql://user:password@localhost:3307/daox_test".into());
     let pool = MySqlPoolOptions::new()
         .max_connections(5)
-        .connect("mysql://root:root@localhost:3307/daox_test")
+        .connect(&mysql_url)
         .await?;
 
     println!("🐬 MYSQL/MARIADB DEMONSTRATION (pure sqlx, zero framework)");

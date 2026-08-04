@@ -69,29 +69,9 @@ impl CompTypesTable {
                 errors.push("f_int: maximum value '2147483647' exceeded".into());
             }
         }
-        #[cfg(feature = "validation")]
-        if let Some(v) = self.f_text.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("f_text: format constraint not met".into());
-            }
-        }
         if let Some(v) = self.f_varchar.as_ref() {
             if v.len() > 255 {
                 errors.push("f_varchar: exceeds max_length 255".into());
-            }
-        }
-        #[cfg(feature = "validation")]
-        if let Some(v) = self.f_varchar.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("f_varchar: format constraint not met".into());
             }
         }
         if let Some(v) = Some(&self.id) {
@@ -142,7 +122,7 @@ impl CompTypesTable {
 
     /// Streams rows from the table, ordered by the primary key.
     /// **⚠️ Performance Warning:** Streaming a whole table without a limit or timeout can cause connection pool starvation.
-    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS.
+    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS. Timeouts are managed by the underlying sqlx `AnyPoolOptions` settings.
     #[deprecated(
         since = "0.2.0",
         note = "Use cursor-based pagination instead to prevent pool starvation."
@@ -209,6 +189,14 @@ impl CompTypesTable {
             .fetch_one(executor)
             .await?;
         Ok(id as u64)
+    }
+
+    pub async fn insert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.insert(executor).await.map_err(|e| e.into())
     }
 
     /// Inserts a batch of records using Postgres COPY (ultra-fast).
@@ -314,6 +302,14 @@ impl CompTypesTable {
         Ok(result.rows_affected())
     }
 
+    pub async fn upsert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.upsert(executor).await.map_err(|e| e.into())
+    }
+
     /// Upserts a batch of records.
     /// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
     pub async fn upsert_batch<'e>(
@@ -361,6 +357,14 @@ impl CompTypesTable {
         query = query.bind(&self.id);
         let result = query.execute(executor).await?;
         Ok(result.rows_affected())
+    }
+
+    pub async fn update_validated_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.update_by_id(executor).await.map_err(|e| e.into())
     }
 
     pub async fn delete_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
@@ -783,7 +787,7 @@ impl CompTypesTable {
             127 => {
                 r#"UPDATE "comp_types_table" SET "f_bool" = $1, "f_decimal" = $2, "f_double" = $3, "f_float" = $4, "f_int" = $5, "f_text" = $6, "f_varchar" = $7 WHERE "id" = $8"#
             }
-            _ => unreachable!(),
+            _ => return Err(sqlx::Error::Protocol("invalid patch mask".into())),
         };
 
         let mut query = sqlx::query::<sqlx::Postgres>(query_str);

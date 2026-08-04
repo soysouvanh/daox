@@ -44,16 +44,6 @@ impl UserRoles {
                 errors.push("role_name: exceeds max_length 50".into());
             }
         }
-        #[cfg(feature = "validation")]
-        if let Some(v) = Some(&self.role_name) {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("role_name: format constraint not met".into());
-            }
-        }
         if let Some(v) = Some(&self.user_id) {
             if (*v as i64) < 0 {
                 errors.push("user_id: minimum value '0' not met".into());
@@ -102,7 +92,7 @@ impl UserRoles {
 
     /// Streams rows from the table, ordered by the primary key.
     /// **⚠️ Performance Warning:** Streaming a whole table without a limit or timeout can cause connection pool starvation.
-    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS.
+    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS. Timeouts are managed by the underlying sqlx `AnyPoolOptions` settings.
     #[deprecated(
         since = "0.2.0",
         note = "Use cursor-based pagination instead to prevent pool starvation."
@@ -128,6 +118,14 @@ impl UserRoles {
             .execute(executor)
             .await?;
         Ok(result.rows_affected())
+    }
+
+    pub async fn insert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.insert(executor).await.map_err(|e| e.into())
     }
 
     /// Inserts a batch of records using Postgres COPY (ultra-fast).
@@ -185,64 +183,6 @@ impl UserRoles {
         Ok(items.len() as u64)
     }
 
-    pub async fn list_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
-        executor: E,
-        user_id: i64,
-        limit: i64,
-    ) -> sqlx::Result<Vec<Self>> {
-        let limit = limit.clamp(1, 10000);
-        let query = r#"SELECT "assigned_at", "role_name", "user_id" FROM "user_roles" WHERE "user_id" = $1 ORDER BY "user_id" ASC LIMIT $2"#;
-        sqlx::query_as::<_, Self>(query)
-            .bind(user_id)
-            .bind(limit)
-            .fetch_all(executor)
-            .await
-    }
-
-    /// Streams rows from the table, filtered by user_id.
-    /// **⚠️ Performance Warning:** Unbounded streaming is potentially dangerous.
-    /// A `limit` parameter is now mandatory to prevent connection pool starvation.
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use cursor-based pagination instead to prevent pool starvation."
-    )]
-    pub fn stream_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres> + 'e>(
-        executor: E,
-        user_id: i64,
-        limit: i64,
-    ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let limit = limit.clamp(1, 10000);
-        let query = r#"SELECT "assigned_at", "role_name", "user_id" FROM "user_roles" WHERE "user_id" = $1 ORDER BY "user_id" ASC LIMIT $2"#;
-        sqlx::query_as::<_, Self>(query)
-            .bind(user_id)
-            .bind(limit)
-            .fetch(executor)
-    }
-
-    pub async fn exists_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
-        executor: E,
-        user_id: i64,
-    ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM "user_roles" WHERE "user_id" = $1 LIMIT 1"#;
-        let exists: Option<(i32,)> = sqlx::query_as(query)
-            .bind(user_id)
-            .fetch_optional(executor)
-            .await?;
-        Ok(exists.is_some())
-    }
-
-    pub async fn delete_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
-        executor: E,
-        user_id: i64,
-    ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM "user_roles" WHERE "user_id" = $1"#;
-        let result = sqlx::query::<sqlx::Postgres>(query)
-            .bind(user_id)
-            .execute(executor)
-            .await?;
-        Ok(result.rows_affected())
-    }
-
     pub async fn get_by_user_id_and_role_name<
         'e,
         E: sqlx::Executor<'e, Database = sqlx::Postgres>,
@@ -289,6 +229,64 @@ impl UserRoles {
         let result = sqlx::query::<sqlx::Postgres>(query)
             .bind(user_id)
             .bind(role_name)
+            .execute(executor)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn list_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+        executor: E,
+        user_id: i64,
+        limit: i64,
+    ) -> sqlx::Result<Vec<Self>> {
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT "assigned_at", "role_name", "user_id" FROM "user_roles" WHERE "user_id" = $1 ORDER BY "user_id" ASC LIMIT $2"#;
+        sqlx::query_as::<_, Self>(query)
+            .bind(user_id)
+            .bind(limit)
+            .fetch_all(executor)
+            .await
+    }
+
+    /// Streams rows from the table, filtered by user_id.
+    /// **⚠️ Performance Warning:** Unbounded streaming is potentially dangerous.
+    /// A `limit` parameter is now mandatory to prevent connection pool starvation. Timeouts are managed by the underlying sqlx `AnyPoolOptions` settings.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use cursor-based pagination instead to prevent pool starvation."
+    )]
+    pub fn stream_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres> + 'e>(
+        executor: E,
+        user_id: i64,
+        limit: i64,
+    ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT "assigned_at", "role_name", "user_id" FROM "user_roles" WHERE "user_id" = $1 ORDER BY "user_id" ASC LIMIT $2"#;
+        sqlx::query_as::<_, Self>(query)
+            .bind(user_id)
+            .bind(limit)
+            .fetch(executor)
+    }
+
+    pub async fn exists_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+        executor: E,
+        user_id: i64,
+    ) -> sqlx::Result<bool> {
+        let query = r#"SELECT 1 FROM "user_roles" WHERE "user_id" = $1 LIMIT 1"#;
+        let exists: Option<(i32,)> = sqlx::query_as(query)
+            .bind(user_id)
+            .fetch_optional(executor)
+            .await?;
+        Ok(exists.is_some())
+    }
+
+    pub async fn delete_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+        executor: E,
+        user_id: i64,
+    ) -> sqlx::Result<u64> {
+        let query = r#"DELETE FROM "user_roles" WHERE "user_id" = $1"#;
+        let result = sqlx::query::<sqlx::Postgres>(query)
+            .bind(user_id)
             .execute(executor)
             .await?;
         Ok(result.rows_affected())

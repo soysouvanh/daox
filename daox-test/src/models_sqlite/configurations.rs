@@ -49,39 +49,9 @@ impl Configurations {
                 errors.push("id: maximum value '2147483647' exceeded".into());
             }
         }
-        #[cfg(feature = "validation")]
-        if let Some(v) = self.r#match.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("r#match: format constraint not met".into());
-            }
-        }
         if let Some(v) = Some(&self.r#type) {
             if v.len() < 1 {
                 errors.push("r#type: min_length 1 not met".into());
-            }
-        }
-        #[cfg(feature = "validation")]
-        if let Some(v) = Some(&self.r#type) {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("r#type: format constraint not met".into());
-            }
-        }
-        #[cfg(feature = "validation")]
-        if let Some(v) = self.value.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("value: format constraint not met".into());
             }
         }
         if errors.is_empty() {
@@ -111,7 +81,7 @@ impl Configurations {
     }
 
     /// Returns an approximate total number of rows in the table.
-    /// Uses `MAX(rowid)` to provide an instant O(1) estimate without a full table scan.
+    /// WARNING (SQLite): Uses `MAX(rowid)` which overestimates the count if rows have been deleted.
     pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         executor: E,
     ) -> sqlx::Result<u64> {
@@ -125,7 +95,7 @@ impl Configurations {
 
     /// Streams rows from the table, ordered by the primary key.
     /// **⚠️ Performance Warning:** Streaming a whole table without a limit or timeout can cause connection pool starvation.
-    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS.
+    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS. Timeouts are managed by the underlying sqlx `AnyPoolOptions` settings.
     #[deprecated(
         since = "0.2.0",
         note = "Use cursor-based pagination instead to prevent pool starvation."
@@ -190,6 +160,14 @@ impl Configurations {
         Ok(result.last_insert_rowid() as u64)
     }
 
+    pub async fn insert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.insert(executor).await.map_err(|e| e.into())
+    }
+
     /// Inserts a batch of records.
     /// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
     pub async fn insert_batch<'e>(
@@ -228,6 +206,14 @@ impl Configurations {
             .execute(executor)
             .await?;
         Ok(result.rows_affected())
+    }
+
+    pub async fn upsert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.upsert(executor).await.map_err(|e| e.into())
     }
 
     /// Upserts a batch of records.
@@ -270,6 +256,14 @@ impl Configurations {
         query = query.bind(&self.id);
         let result = query.execute(executor).await?;
         Ok(result.rows_affected())
+    }
+
+    pub async fn update_validated_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.update_by_id(executor).await.map_err(|e| e.into())
     }
 
     pub async fn delete_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
@@ -342,7 +336,7 @@ impl Configurations {
             7 => {
                 r#"UPDATE `configurations` SET `match` = ?, `type` = ?, `value` = ? WHERE `id` = ?"#
             }
-            _ => unreachable!(),
+            _ => return Err(sqlx::Error::Protocol("invalid patch mask".into())),
         };
 
         let mut query = sqlx::query::<sqlx::Sqlite>(query_str);

@@ -1,3 +1,4 @@
+# .cargo/config.toml — NE PAS COMMITER les credentials réels
+# Copier .env.example vers .env et adapter les valeurs
 [env]
-DATABASE_URL_MYSQL = "mysql://root:root@localhost:3307/daox_test"
-DATABASE_URL_PG = "postgres://root:root@localhost:5433/daox_test"
+# Les URLs sont lues depuis .env via dotenv dans build.rs

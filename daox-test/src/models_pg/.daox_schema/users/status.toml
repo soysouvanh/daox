@@ -27,7 +27,7 @@ message = "schema.min_length.message|1"
 # message = 
 
 [format]
-value = '^[À-ÿA-Za-z0-9_ -]*$'
+value = ""
 message = "schema.format.message"
 
 [is_primary_key]

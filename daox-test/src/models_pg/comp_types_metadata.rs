@@ -113,7 +113,7 @@ impl CompTypesMetadata {
 
     /// Streams rows from the table, ordered by the primary key.
     /// **⚠️ Performance Warning:** Streaming a whole table without a limit or timeout can cause connection pool starvation.
-    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS.
+    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS. Timeouts are managed by the underlying sqlx `AnyPoolOptions` settings.
     #[deprecated(
         since = "0.2.0",
         note = "Use cursor-based pagination instead to prevent pool starvation."
@@ -179,6 +179,14 @@ impl CompTypesMetadata {
             .fetch_one(executor)
             .await?;
         Ok(id as u64)
+    }
+
+    pub async fn insert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.insert(executor).await.map_err(|e| e.into())
     }
 
     /// Inserts a batch of records using Postgres COPY (ultra-fast).
@@ -272,6 +280,14 @@ impl CompTypesMetadata {
         Ok(result.rows_affected())
     }
 
+    pub async fn upsert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.upsert(executor).await.map_err(|e| e.into())
+    }
+
     /// Upserts a batch of records.
     /// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
     pub async fn upsert_batch<'e>(
@@ -317,6 +333,14 @@ impl CompTypesMetadata {
         query = query.bind(&self.id);
         let result = query.execute(executor).await?;
         Ok(result.rows_affected())
+    }
+
+    pub async fn update_validated_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.update_by_id(executor).await.map_err(|e| e.into())
     }
 
     pub async fn delete_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
@@ -567,7 +591,7 @@ impl CompTypesMetadata {
             63 => {
                 r#"UPDATE "comp_types_metadata" SET "comp_types_id" = $1, "f_blob" = $2, "f_date" = $3, "f_datetime" = $4, "f_json" = $5, "f_timestamp" = $6 WHERE "id" = $7"#
             }
-            _ => unreachable!(),
+            _ => return Err(sqlx::Error::Protocol("invalid patch mask".into())),
         };
 
         let mut query = sqlx::query::<sqlx::Postgres>(query_str);

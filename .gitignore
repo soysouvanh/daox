@@ -3,3 +3,4 @@ repomix.config.json
 repomix-output.xml
 **/.DS_Store
 *.sqlite
+.env

@@ -84,26 +84,6 @@ impl CompTypesMatView {
     #[allow(unused_comparisons)]
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
-        #[cfg(feature = "validation")]
-        if let Some(v) = self.f_date.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("f_date: format constraint not met".into());
-            }
-        }
-        #[cfg(feature = "validation")]
-        if let Some(v) = self.f_datetime.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("f_datetime: format constraint not met".into());
-            }
-        }
         if let Some(v) = self.f_int.as_ref() {
             if (*v as i64) < 0 {
                 errors.push("f_int: minimum value '0' not met".into());
@@ -112,36 +92,6 @@ impl CompTypesMatView {
         if let Some(v) = self.f_int.as_ref() {
             if (*v as i64) > 2147483647 {
                 errors.push("f_int: maximum value '2147483647' exceeded".into());
-            }
-        }
-        #[cfg(feature = "validation")]
-        if let Some(v) = self.f_text.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("f_text: format constraint not met".into());
-            }
-        }
-        #[cfg(feature = "validation")]
-        if let Some(v) = self.f_timestamp.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("f_timestamp: format constraint not met".into());
-            }
-        }
-        #[cfg(feature = "validation")]
-        if let Some(v) = self.f_varchar.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("f_varchar: format constraint not met".into());
             }
         }
         if let Some(v) = self.id.as_ref() {
@@ -181,7 +131,7 @@ impl CompTypesMatView {
     }
 
     /// Returns an approximate total number of rows in the table.
-    /// Uses `MAX(rowid)` to provide an instant O(1) estimate without a full table scan.
+    /// WARNING (SQLite): Uses `MAX(rowid)` which overestimates the count if rows have been deleted.
     pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         executor: E,
     ) -> sqlx::Result<u64> {
@@ -195,7 +145,7 @@ impl CompTypesMatView {
 
     /// Streams rows from the table, ordered by the primary key.
     /// **⚠️ Performance Warning:** Streaming a whole table without a limit or timeout can cause connection pool starvation.
-    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS.
+    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS. Timeouts are managed by the underlying sqlx `AnyPoolOptions` settings.
     #[deprecated(
         since = "0.2.0",
         note = "Use cursor-based pagination instead to prevent pool starvation."
@@ -231,6 +181,14 @@ impl CompTypesMatView {
             .execute(executor)
             .await?;
         Ok(result.rows_affected())
+    }
+
+    pub async fn insert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.insert(executor).await.map_err(|e| e.into())
     }
 
     /// Inserts a batch of records.

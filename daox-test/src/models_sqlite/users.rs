@@ -54,27 +54,6 @@ impl Users {
                 errors.push("email: min_length 1 not met".into());
             }
         }
-        #[cfg(feature = "validation")]
-        if let Some(v) = Some(&self.email) {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$")
-                    .expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("email: format constraint not met".into());
-            }
-        }
-        #[cfg(feature = "validation")]
-        if let Some(v) = self.first_name.as_ref() {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("first_name: format constraint not met".into());
-            }
-        }
         if let Some(v) = Some(&self.id) {
             if (*v as i64) < 0 {
                 errors.push("id: minimum value '0' not met".into());
@@ -90,29 +69,9 @@ impl Users {
                 errors.push("last_name: min_length 1 not met".into());
             }
         }
-        #[cfg(feature = "validation")]
-        if let Some(v) = Some(&self.last_name) {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("last_name: format constraint not met".into());
-            }
-        }
         if let Some(v) = Some(&self.status) {
             if v.len() < 1 {
                 errors.push("status: min_length 1 not met".into());
-            }
-        }
-        #[cfg(feature = "validation")]
-        if let Some(v) = Some(&self.status) {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("status: format constraint not met".into());
             }
         }
         if errors.is_empty() {
@@ -142,7 +101,7 @@ impl Users {
     }
 
     /// Returns an approximate total number of rows in the table.
-    /// Uses `MAX(rowid)` to provide an instant O(1) estimate without a full table scan.
+    /// WARNING (SQLite): Uses `MAX(rowid)` which overestimates the count if rows have been deleted.
     pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
         executor: E,
     ) -> sqlx::Result<u64> {
@@ -156,7 +115,7 @@ impl Users {
 
     /// Streams rows from the table, ordered by the primary key.
     /// **⚠️ Performance Warning:** Streaming a whole table without a limit or timeout can cause connection pool starvation.
-    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS.
+    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS. Timeouts are managed by the underlying sqlx `AnyPoolOptions` settings.
     #[deprecated(
         since = "0.2.0",
         note = "Use cursor-based pagination instead to prevent pool starvation."
@@ -223,6 +182,14 @@ impl Users {
         Ok(result.last_insert_rowid() as u64)
     }
 
+    pub async fn insert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.insert(executor).await.map_err(|e| e.into())
+    }
+
     /// Inserts a batch of records.
     /// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
     pub async fn insert_batch<'e>(
@@ -265,6 +232,14 @@ impl Users {
             .execute(executor)
             .await?;
         Ok(result.rows_affected())
+    }
+
+    pub async fn upsert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.upsert(executor).await.map_err(|e| e.into())
     }
 
     /// Upserts a batch of records.
@@ -310,6 +285,14 @@ impl Users {
         query = query.bind(&self.id);
         let result = query.execute(executor).await?;
         Ok(result.rows_affected())
+    }
+
+    pub async fn update_validated_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.update_by_id(executor).await.map_err(|e| e.into())
     }
 
     pub async fn delete_by_id<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
@@ -442,7 +425,7 @@ impl Users {
             31 => {
                 r#"UPDATE `users` SET `created_at` = ?, `email` = ?, `first_name` = ?, `last_name` = ?, `status` = ? WHERE `id` = ?"#
             }
-            _ => unreachable!(),
+            _ => return Err(sqlx::Error::Protocol("invalid patch mask".into())),
         };
 
         let mut query = sqlx::query::<sqlx::Sqlite>(query_str);
@@ -463,41 +446,6 @@ impl Users {
         }
         query = query.bind(id);
         let result = query.execute(executor).await?;
-        Ok(result.rows_affected())
-    }
-
-    pub async fn get_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
-        executor: E,
-        email: &str,
-    ) -> sqlx::Result<Option<Self>> {
-        let query = r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM `users` WHERE `email` = ?"#;
-        sqlx::query_as::<_, Self>(query)
-            .bind(email)
-            .fetch_optional(executor)
-            .await
-    }
-
-    pub async fn exists_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
-        executor: E,
-        email: &str,
-    ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM `users` WHERE `email` = ? LIMIT 1"#;
-        let exists: Option<(i32,)> = sqlx::query_as(query)
-            .bind(email)
-            .fetch_optional(executor)
-            .await?;
-        Ok(exists.is_some())
-    }
-
-    pub async fn delete_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
-        executor: E,
-        email: &str,
-    ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM `users` WHERE `email` = ?"#;
-        let result = sqlx::query::<sqlx::Sqlite>(query)
-            .bind(email)
-            .execute(executor)
-            .await?;
         Ok(result.rows_affected())
     }
 
@@ -522,7 +470,7 @@ impl Users {
 
     /// Streams rows from the table, filtered by last_name_and_first_name.
     /// **⚠️ Performance Warning:** Unbounded streaming is potentially dangerous.
-    /// A `limit` parameter is now mandatory to prevent connection pool starvation.
+    /// A `limit` parameter is now mandatory to prevent connection pool starvation. Timeouts are managed by the underlying sqlx `AnyPoolOptions` settings.
     #[deprecated(
         since = "0.2.0",
         note = "Use cursor-based pagination instead to prevent pool starvation."
@@ -574,6 +522,41 @@ impl Users {
         let result = sqlx::query::<sqlx::Sqlite>(query)
             .bind(last_name)
             .bind(first_name)
+            .execute(executor)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn get_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        email: &str,
+    ) -> sqlx::Result<Option<Self>> {
+        let query = r#"SELECT `created_at`, `email`, `first_name`, `id`, `last_name`, `status` FROM `users` WHERE `email` = ?"#;
+        sqlx::query_as::<_, Self>(query)
+            .bind(email)
+            .fetch_optional(executor)
+            .await
+    }
+
+    pub async fn exists_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        email: &str,
+    ) -> sqlx::Result<bool> {
+        let query = r#"SELECT 1 FROM `users` WHERE `email` = ? LIMIT 1"#;
+        let exists: Option<(i32,)> = sqlx::query_as(query)
+            .bind(email)
+            .fetch_optional(executor)
+            .await?;
+        Ok(exists.is_some())
+    }
+
+    pub async fn delete_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+        executor: E,
+        email: &str,
+    ) -> sqlx::Result<u64> {
+        let query = r#"DELETE FROM `users` WHERE `email` = ?"#;
+        let result = sqlx::query::<sqlx::Sqlite>(query)
+            .bind(email)
             .execute(executor)
             .await?;
         Ok(result.rows_affected())

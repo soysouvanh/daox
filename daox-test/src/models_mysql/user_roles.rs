@@ -44,16 +44,6 @@ impl UserRoles {
                 errors.push("role_name: exceeds max_length 50".into());
             }
         }
-        #[cfg(feature = "validation")]
-        if let Some(v) = Some(&self.role_name) {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = RE.get_or_init(|| {
-                regex::Regex::new("^[À-ÿA-Za-z0-9_ -]*$").expect("Invalid regex in TOML")
-            });
-            if !re.is_match(v) {
-                errors.push("role_name: format constraint not met".into());
-            }
-        }
         if let Some(v) = Some(&self.user_id) {
             if (*v as i64) < 0 {
                 errors.push("user_id: minimum value '0' not met".into());
@@ -91,7 +81,7 @@ impl UserRoles {
     }
 
     /// Returns an approximate total number of rows in the table using database statistics (O(1)).
-    /// This is extremely fast for huge tables but the number may be slightly outdated.
+    /// WARNING (MySQL): For InnoDB tables, this value is an estimate and can vary significantly from the actual count.
     pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
         executor: E,
     ) -> sqlx::Result<u64> {
@@ -102,7 +92,7 @@ impl UserRoles {
 
     /// Streams rows from the table, ordered by the primary key.
     /// **⚠️ Performance Warning:** Streaming a whole table without a limit or timeout can cause connection pool starvation.
-    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS.
+    /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS. Timeouts are managed by the underlying sqlx `AnyPoolOptions` settings.
     #[deprecated(
         since = "0.2.0",
         note = "Use cursor-based pagination instead to prevent pool starvation."
@@ -161,6 +151,14 @@ impl UserRoles {
         Ok(result.rows_affected())
     }
 
+    pub async fn insert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.insert(executor).await.map_err(|e| e.into())
+    }
+
     /// Inserts a batch of records.
     /// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.
     pub async fn insert_batch<'e>(
@@ -199,6 +197,14 @@ impl UserRoles {
             .execute(executor)
             .await?;
         Ok(result.rows_affected())
+    }
+
+    pub async fn upsert_validated<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.upsert(executor).await.map_err(|e| e.into())
     }
 
     /// Upserts a batch of records.
@@ -245,6 +251,19 @@ impl UserRoles {
         Ok(result.rows_affected())
     }
 
+    pub async fn update_validated_by_role_name_and_user_id<
+        'e,
+        E: sqlx::Executor<'e, Database = sqlx::MySql>,
+    >(
+        &self,
+        executor: E,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        self.validate().map_err(|e| e.join(", "))?;
+        self.update_by_role_name_and_user_id(executor)
+            .await
+            .map_err(|e| e.into())
+    }
+
     pub async fn delete_by_role_name_and_user_id<
         'e,
         E: sqlx::Executor<'e, Database = sqlx::MySql>,
@@ -286,7 +305,7 @@ impl UserRoles {
             1 => {
                 r#"UPDATE `user_roles` SET `assigned_at` = ? WHERE `role_name` = ? AND `user_id` = ?"#
             }
-            _ => unreachable!(),
+            _ => return Err(sqlx::Error::Protocol("invalid patch mask".into())),
         };
 
         let mut query = sqlx::query::<sqlx::MySql>(query_str);
@@ -296,64 +315,6 @@ impl UserRoles {
         query = query.bind(role_name);
         query = query.bind(user_id);
         let result = query.execute(executor).await?;
-        Ok(result.rows_affected())
-    }
-
-    pub async fn list_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
-        executor: E,
-        user_id: i64,
-        limit: i64,
-    ) -> sqlx::Result<Vec<Self>> {
-        let limit = limit.clamp(1, 10000);
-        let query = r#"SELECT `assigned_at`, `role_name`, `user_id` FROM `user_roles` WHERE `user_id` = ? ORDER BY `role_name` ASC, `user_id` ASC LIMIT ?"#;
-        sqlx::query_as::<_, Self>(query)
-            .bind(user_id)
-            .bind(limit)
-            .fetch_all(executor)
-            .await
-    }
-
-    /// Streams rows from the table, filtered by user_id.
-    /// **⚠️ Performance Warning:** Unbounded streaming is potentially dangerous.
-    /// A `limit` parameter is now mandatory to prevent connection pool starvation.
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use cursor-based pagination instead to prevent pool starvation."
-    )]
-    pub fn stream_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql> + 'e>(
-        executor: E,
-        user_id: i64,
-        limit: i64,
-    ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
-        let limit = limit.clamp(1, 10000);
-        let query = r#"SELECT `assigned_at`, `role_name`, `user_id` FROM `user_roles` WHERE `user_id` = ? ORDER BY `role_name` ASC, `user_id` ASC LIMIT ?"#;
-        sqlx::query_as::<_, Self>(query)
-            .bind(user_id)
-            .bind(limit)
-            .fetch(executor)
-    }
-
-    pub async fn exists_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
-        executor: E,
-        user_id: i64,
-    ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM `user_roles` WHERE `user_id` = ? LIMIT 1"#;
-        let exists: Option<(i32,)> = sqlx::query_as(query)
-            .bind(user_id)
-            .fetch_optional(executor)
-            .await?;
-        Ok(exists.is_some())
-    }
-
-    pub async fn delete_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
-        executor: E,
-        user_id: i64,
-    ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM `user_roles` WHERE `user_id` = ?"#;
-        let result = sqlx::query::<sqlx::MySql>(query)
-            .bind(user_id)
-            .execute(executor)
-            .await?;
         Ok(result.rows_affected())
     }
 
@@ -399,6 +360,64 @@ impl UserRoles {
         let result = sqlx::query::<sqlx::MySql>(query)
             .bind(user_id)
             .bind(role_name)
+            .execute(executor)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn list_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
+        executor: E,
+        user_id: i64,
+        limit: i64,
+    ) -> sqlx::Result<Vec<Self>> {
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT `assigned_at`, `role_name`, `user_id` FROM `user_roles` WHERE `user_id` = ? ORDER BY `role_name` ASC, `user_id` ASC LIMIT ?"#;
+        sqlx::query_as::<_, Self>(query)
+            .bind(user_id)
+            .bind(limit)
+            .fetch_all(executor)
+            .await
+    }
+
+    /// Streams rows from the table, filtered by user_id.
+    /// **⚠️ Performance Warning:** Unbounded streaming is potentially dangerous.
+    /// A `limit` parameter is now mandatory to prevent connection pool starvation. Timeouts are managed by the underlying sqlx `AnyPoolOptions` settings.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use cursor-based pagination instead to prevent pool starvation."
+    )]
+    pub fn stream_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql> + 'e>(
+        executor: E,
+        user_id: i64,
+        limit: i64,
+    ) -> impl futures::Stream<Item = sqlx::Result<Self>> + 'e {
+        let limit = limit.clamp(1, 10000);
+        let query = r#"SELECT `assigned_at`, `role_name`, `user_id` FROM `user_roles` WHERE `user_id` = ? ORDER BY `role_name` ASC, `user_id` ASC LIMIT ?"#;
+        sqlx::query_as::<_, Self>(query)
+            .bind(user_id)
+            .bind(limit)
+            .fetch(executor)
+    }
+
+    pub async fn exists_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
+        executor: E,
+        user_id: i64,
+    ) -> sqlx::Result<bool> {
+        let query = r#"SELECT 1 FROM `user_roles` WHERE `user_id` = ? LIMIT 1"#;
+        let exists: Option<(i32,)> = sqlx::query_as(query)
+            .bind(user_id)
+            .fetch_optional(executor)
+            .await?;
+        Ok(exists.is_some())
+    }
+
+    pub async fn delete_by_user_id<'e, E: sqlx::Executor<'e, Database = sqlx::MySql>>(
+        executor: E,
+        user_id: i64,
+    ) -> sqlx::Result<u64> {
+        let query = r#"DELETE FROM `user_roles` WHERE `user_id` = ?"#;
+        let result = sqlx::query::<sqlx::MySql>(query)
+            .bind(user_id)
             .execute(executor)
             .await?;
         Ok(result.rows_affected())

@@ -5,8 +5,6 @@ pub mod active_users;
 pub use active_users::*;
 pub mod comp_types_active_view;
 pub use comp_types_active_view::*;
-pub mod comp_types_mat_view;
-pub use comp_types_mat_view::*;
 pub mod comp_types_metadata;
 pub use comp_types_metadata::*;
 pub mod comp_types_table;
