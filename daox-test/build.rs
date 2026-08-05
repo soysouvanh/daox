@@ -36,7 +36,7 @@ fn validate_db_url(url: &str) -> Result<(), String> {
             url
         ));
     }
-    // Rejeter les caractères de contrôle
+    // Reject control characters
     if url.chars().any(|c| c.is_control()) {
         return Err("Database URL contains control characters".to_string());
     }

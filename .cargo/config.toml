@@ -1,4 +1,0 @@
-# .cargo/config.toml — NE PAS COMMITER les credentials réels
-# Copier .env.example vers .env et adapter les valeurs
-[env]
-# Les URLs sont lues depuis .env via dotenv dans build.rs

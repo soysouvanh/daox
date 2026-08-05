@@ -247,7 +247,7 @@ pub fn safe_write_if_changed<P: AsRef<std::path::Path>, C: AsRef<[u8]>>(
     let p = path.as_ref();
     let c = content.as_ref();
 
-    // 1. Vérification symlink sur la cible
+    // 1. Symlink check on the target
     match fs::symlink_metadata(p) {
         Ok(meta) => {
             if meta.file_type().is_symlink() {
@@ -258,7 +258,7 @@ pub fn safe_write_if_changed<P: AsRef<std::path::Path>, C: AsRef<[u8]>>(
         Err(e) => return Err(format!("Cannot stat {:?}: {}", p, e)),
     }
 
-    // 2. Vérification symlink sur le parent
+    // 2. Symlink check on the parent
     if let Some(parent) = p.parent() {
         match fs::symlink_metadata(parent) {
             Ok(parent_meta) => {
@@ -274,10 +274,10 @@ pub fn safe_write_if_changed<P: AsRef<std::path::Path>, C: AsRef<[u8]>>(
     }
 
     // 3. Vérification contenu existant (pas de réécriture inutile)
-    if let Ok(existing) = fs::read(p) {
-        if existing == c {
-            return Ok(false);
-        }
+    if let Ok(existing) = fs::read(p)
+        && existing == c
+    {
+        return Ok(false);
     }
 
     // 4. Écriture atomique : fichier temporaire create_new + rename
@@ -573,7 +573,7 @@ impl DaoGenerator {
                 SELECT viewname::text AS \"TABLE_NAME\", 'VIEW' AS \"TABLE_TYPE\" FROM pg_views WHERE schemaname = 'public'
                 ",
                 "
-                SELECT 
+                SELECT
                     c.column_name::text AS \"COLUMN_NAME\",
                     c.data_type::text AS \"DATA_TYPE\",
                     c.is_nullable::text AS \"IS_NULLABLE\",
@@ -585,7 +585,7 @@ impl DaoGenerator {
                     CASE WHEN c.is_generated = 'ALWAYS' THEN 1 ELSE 0 END AS \"IS_GENERATED\"
                 FROM information_schema.columns c
                 LEFT JOIN (
-                    SELECT kcu.table_schema, kcu.table_name, kcu.column_name, 
+                    SELECT kcu.table_schema, kcu.table_name, kcu.column_name,
                            CASE WHEN tc.constraint_type = 'PRIMARY KEY' THEN 'PRI' WHEN tc.constraint_type = 'UNIQUE' THEN 'UNI' ELSE '' END as constraint_type
                     FROM information_schema.key_column_usage kcu
                     JOIN information_schema.table_constraints tc ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema
@@ -597,7 +597,7 @@ impl DaoGenerator {
             (
                 "SELECT name AS TABLE_NAME, type AS TABLE_TYPE FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'",
                 "
-                SELECT 
+                SELECT
                     ti.name AS COLUMN_NAME,
                     ti.type AS DATA_TYPE,
                     CASE WHEN ti.\"notnull\" = 1 THEN 'NO' ELSE 'YES' END AS IS_NULLABLE,
@@ -675,14 +675,16 @@ impl DaoGenerator {
                     );
                 }
                 let name = entry.file_name().to_string_lossy().to_string();
-                if name != "overrides" && name != "databases.toml" && !table_names.contains(&name) {
-                    if let Err(e) = safe_remove_dir_all(&entry.path()) {
-                        eprintln!(
-                            "Daox: warning: could not remove orphaned entry {:?}: {}",
-                            entry.path(),
-                            e
-                        );
-                    }
+                if name != "overrides"
+                    && name != "databases.toml"
+                    && !table_names.contains(&name)
+                    && let Err(e) = safe_remove_dir_all(&entry.path())
+                {
+                    eprintln!(
+                        "Daox: warning: could not remove orphaned entry {:?}: {}",
+                        entry.path(),
+                        e
+                    );
                 }
             }
         }
@@ -707,27 +709,32 @@ impl DaoGenerator {
                     }
             let is_view = table_type.to_uppercase() == "VIEW";
             let table_dir = schema_path.join(&table_name);
-            fs::create_dir_all(&table_dir)?;
+            let table_dir_c = table_dir.clone();
+            tokio::task::spawn_blocking(move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+                fs::create_dir_all(&table_dir_c)?;
 
-            let table_toml_path = table_dir.join("_table.toml");
-            let mut db_name = "default".to_string();
-            let mut existing_desc = None;
-            if let Ok(content) = read_toml_file_limited(&table_toml_path)
-                && let Ok(config) = toml::from_str::<TableConfig>(&content)
-            {
-                db_name = config.database;
-                existing_desc = config.description;
-            }
-            let table_toml_data = TableToml {
-                database: db_name,
-                description: existing_desc,
-                is_view: is_view.then_some(true),
-            };
+                let table_toml_path = table_dir_c.join("_table.toml");
+                let mut db_name = "default".to_string();
+                let mut existing_desc = None;
+                if let Ok(content) = read_toml_file_limited(&table_toml_path)
+                    && let Ok(config) = toml::from_str::<TableConfig>(&content)
+                {
+                    db_name = config.database;
+                    existing_desc = config.description;
+                }
+                
+                let table_toml_data = TableToml {
+                    database: db_name,
+                    description: existing_desc,
+                    is_view: is_view.then_some(true),
+                };
 
-            let toml_str = toml::to_string_pretty(&table_toml_data)
-                .map_err(|e| format!("TOML serialization error: {}", e))?;
+                let toml_str = toml::to_string_pretty(&table_toml_data)
+                    .map_err(|e| format!("TOML serialization error: {}", e))?;
 
-            safe_write_if_changed(&table_toml_path, &toml_str)?;
+                safe_write_if_changed(&table_toml_path, &toml_str)?;
+                Ok(())
+            }).await.map_err(|e| e.to_string())??;
 
             let columns = tokio::time::timeout(
                 std::time::Duration::from_secs(10),
@@ -844,7 +851,7 @@ impl DaoGenerator {
                     } else {
                         trimmed
                     };
-                    
+
                     let parsed_vals = match parse_mysql_enum(vals_str) {
                         Ok(v) if !v.is_empty() => v,
                         Ok(_) => {
@@ -904,6 +911,7 @@ impl DaoGenerator {
                 use toml::Value as TomlValue;
                 use toml::map::Map as TomlMap;
 
+                #[allow(clippy::too_many_arguments)]
                 fn build_column_toml(
                     rust_type: &str,
                     is_optional: bool,
@@ -921,12 +929,12 @@ impl DaoGenerator {
                     enum_values: Option<&[String]>,
                 ) -> Result<String, String> {
                     let mut root = TomlMap::new();
-                
+
                     let mut type_section = TomlMap::new();
                     type_section.insert("value".into(), TomlValue::String(rust_type.to_string()));
                     type_section.insert("message".into(), TomlValue::String("schema.type.message".into()));
                     root.insert("type".into(), TomlValue::Table(type_section));
-                
+
                     let mut opt_section = TomlMap::new();
                     opt_section.insert("value".into(), TomlValue::Boolean(is_optional));
                     opt_section.insert("message".into(), TomlValue::String(
@@ -941,7 +949,7 @@ impl DaoGenerator {
                         opt_section.insert("default".into(), TomlValue::String(dv.into()));
                     }
                     root.insert("is_optional".into(), TomlValue::Table(opt_section));
-                
+
                     if let Some(len) = inferred_max_length {
                         let mut ml_section = TomlMap::new();
                         ml_section.insert("value".into(), TomlValue::Integer(len as i64));
@@ -950,14 +958,14 @@ impl DaoGenerator {
                         ));
                         root.insert("max_length".into(), TomlValue::Table(ml_section));
                     }
-                
+
                     let mut minl_section = TomlMap::new();
                     minl_section.insert("value".into(), TomlValue::Integer(min_length as i64));
                     minl_section.insert("message".into(), TomlValue::String(
                         format!("schema.min_length.message|{}", min_length)
                     ));
                     root.insert("min_length".into(), TomlValue::Table(minl_section));
-                
+
                     if let Some(v) = min_val {
                         let mut mv_section = TomlMap::new();
                         mv_section.insert("value".into(), TomlValue::Integer(v));
@@ -974,12 +982,12 @@ impl DaoGenerator {
                         ));
                         root.insert("max_value".into(), TomlValue::Table(mv_section));
                     }
-                
+
                     let mut fmt_section = TomlMap::new();
                     fmt_section.insert("value".into(), TomlValue::String(format_regex.to_string()));
                     fmt_section.insert("message".into(), TomlValue::String("schema.format.message".into()));
                     root.insert("format".into(), TomlValue::Table(fmt_section));
-                
+
                     for (key, val) in [
                         ("is_primary_key", is_primary_key),
                         ("is_unique", is_unique),
@@ -992,7 +1000,7 @@ impl DaoGenerator {
                         section.insert("value".into(), TomlValue::Boolean(val));
                         root.insert(key.into(), TomlValue::Table(section));
                     }
-                
+
                     root.insert("business_rules".into(), TomlValue::Table(TomlMap::new()));
 
                     if let Some(evs) = enum_values {
@@ -1014,10 +1022,10 @@ impl DaoGenerator {
                         ev_section.insert("value".into(), TomlValue::Array(vec![]));
                         root.insert("enum_values".into(), TomlValue::Table(ev_section));
                     }
-                
+
                     let toml_value = TomlValue::Table(root);
                     let final_content = toml::to_string_pretty(&toml_value).map_err(|e| e.to_string())?;
-                
+
                     Ok(final_content)
                 }
 
@@ -1037,7 +1045,7 @@ impl DaoGenerator {
                     rust_type, is_optional, min_length, inferred_max_length,
                     min_val, max_val, &format_regex, is_primary_key,
                     is_unique, is_index, is_auto_increment, has_default_val,
-                    is_generated, 
+                    is_generated,
                     parsed_enum.as_deref()
                 ).map_err(|e| e.to_string())?;
 
@@ -1061,7 +1069,7 @@ impl DaoGenerator {
                 "
             } else if is_sqlite {
                 "
-                SELECT 
+                SELECT
                     il.name AS INDEX_NAME,
                     ii.name AS COLUMN_NAME,
                     CASE WHEN il.\"unique\" = 1 THEN 0 ELSE 1 END AS NON_UNIQUE
@@ -1117,10 +1125,10 @@ impl DaoGenerator {
                         columns,
                     });
                 }
-                
+
                 let content = toml::to_string_pretty(&TableIndexesConfig { indexes })
                     .map_err(|e| format!("TOML serialization error: {}", e))?;
-                
+
                 safe_write_if_changed(&idx_file, &content).map_err(|e| e.to_string())?;
             } else if idx_file.exists() {
                 fs::remove_file(&idx_file)?;
@@ -1496,9 +1504,7 @@ impl DaoGenerator {
                                         col_meta.max_value = Some(v);
                                     }
                                     if let Some(v) = ov.format {
-                                        if let Err(e) = validate_regex(&v.value()) {
-                                            return Err(e);
-                                        }
+                                        validate_regex(&v.value())?;
                                         col_meta.format = Some(v);
                                     }
                                     if let Some(v) = ov.is_unique {
@@ -1643,11 +1649,9 @@ impl DaoGenerator {
                 return Err(format!(
                     "Table '{}' has unsafe SQL identifier after parsing",
                     sql_table
-                ).into());
+                ));
             }
-            if let Err(e) = validate_identifier_for_dialect(sql_table, dialect) {
-                return Err(e);
-            }
+            validate_identifier_for_dialect(sql_table, dialect)?;
             let sql_table_q = dialect.quote_ident(sql_table);
 
             // Sorted columns
@@ -1668,7 +1672,7 @@ impl DaoGenerator {
                     return Err(format!(
                         "Column '{}' in table '{}' has unsafe identifier",
                         col_name, sql_table
-                    ).into());
+                    ));
                 }
                 if let Err(e) = validate_identifier_for_dialect(col_name, dialect) {
                     return Err(format!("Column '{}' in table '{}' error: {}", col_name, sql_table, e));
@@ -1758,7 +1762,7 @@ impl DaoGenerator {
                     if let Some(prop) = &col_meta.min_length {
                         let min = prop.value();
                         if min > 0 {
-                            write!(&mut code, 
+                            write!(&mut code,
                                 "        if let Some(v) = {val_ref} {{\n\
                                              if v.len() < {min} {{\n\
                                                  errors.push(\"{field}: min_length {min} not met\".into());\n\
@@ -1770,7 +1774,7 @@ impl DaoGenerator {
                     }
                     if let Some(prop) = &col_meta.max_length {
                         let max = prop.value();
-                        write!(&mut code, 
+                        write!(&mut code,
                             "        if let Some(v) = {val_ref} {{\n\
                                          if v.len() > {max} {{\n\
                                              errors.push(\"{field}: exceeds max_length {max}\".into());\n\
@@ -1780,13 +1784,13 @@ impl DaoGenerator {
                         ).unwrap();
                     }
                 }
-                
+
                 if ty == "String" {
                     if let Some(prop) = &col_meta.enum_values {
                         let evs = prop.value();
                         if !evs.is_empty() {
                             let evs_str = evs.iter().map(|s| format!("{:?}", s)).collect::<Vec<_>>().join(", ");
-                            write!(&mut code, 
+                            write!(&mut code,
                                 "        if let Some(v) = {val_ref} {{\n\
                                              let valid_enums = [{evs}];\n\
                                              if !valid_enums.contains(&v.as_str()) {{\n\
@@ -1804,7 +1808,7 @@ impl DaoGenerator {
                                 return Err(format!("Column '{}': invalid regex format '{}': {}", field, re_str, err));
                             }
                             let re_escaped = format!("{:?}", re_str);
-                            write!(&mut code, 
+                            write!(&mut code,
                                 "        #[cfg(feature = \"validation\")]\n\
                                          if let Some(v) = {val_ref} {{\n\
                                              static RE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();\n\
@@ -1840,7 +1844,7 @@ impl DaoGenerator {
                     if let Some(prop) = &col_meta.min_value {
                         let min = prop.value();
                         if ty == "f32" || ty == "f64" {
-                            write!(&mut code, 
+                            write!(&mut code,
                                 "        if let Some(v) = {val_ref} {{\n\
                                              if !v.is_finite() {{\n\
                                                  errors.push(\"{field}: value must be finite\".into());\n\
@@ -1851,7 +1855,7 @@ impl DaoGenerator {
                                 val_ref = val_ref, field = field, min = min
                             ).unwrap();
                         } else {
-                            write!(&mut code, 
+                            write!(&mut code,
                                 "        if let Some(v) = {val_ref} {{\n\
                                              if (*v as i128) < ({min} as i128) {{\n\
                                                  errors.push(\"{field}: minimum value '{min}' not met\".into());\n\
@@ -1864,7 +1868,7 @@ impl DaoGenerator {
                     if let Some(prop) = &col_meta.max_value {
                         let max = prop.value();
                         if ty == "f32" || ty == "f64" {
-                            write!(&mut code, 
+                            write!(&mut code,
                                 "        if let Some(v) = {val_ref} {{\n\
                                              if !v.is_finite() {{\n\
                                                  errors.push(\"{field}: value must be finite\".into());\n\
@@ -1875,7 +1879,7 @@ impl DaoGenerator {
                                 val_ref = val_ref, field = field, max = max
                             ).unwrap();
                         } else {
-                            write!(&mut code, 
+                            write!(&mut code,
                                 "        if let Some(v) = {val_ref} {{\n\
                                              if (*v as i128) > ({max} as i128) {{\n\
                                                  errors.push(\"{field}: maximum value '{max}' exceeded\".into());\n\
@@ -1890,7 +1894,7 @@ impl DaoGenerator {
             write!(&mut code, "        if errors.is_empty() {{ Ok(()) }} else {{ Err(errors) }}\n    }}\n\n").unwrap();
 
             // count
-            write!(&mut code, 
+            write!(&mut code,
                 "    /// Returns the total number of rows in the table.\n\
                      /// \n\
                      /// **⚠️ Performance Warning:** On some databases (e.g., MySQL/InnoDB, PostgreSQL), \n\
@@ -1910,7 +1914,7 @@ impl DaoGenerator {
 
             // approximate_count
             if dialect == Dialect::Postgres {
-                write!(&mut code, 
+                write!(&mut code,
                     "    /// Returns an approximate total number of rows in the table using database statistics (O(1)).\n\
                          /// This is extremely fast for huge tables but the number may be slightly outdated until the next VACUUM/ANALYZE.\n\
                          pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = {db}>>(executor: E) -> sqlx::Result<u64> {{\n\
@@ -1922,7 +1926,7 @@ impl DaoGenerator {
                     tbl = sql_table,
                 ).unwrap();
             } else if dialect == Dialect::MySql {
-                write!(&mut code, 
+                write!(&mut code,
                     "    /// Returns an approximate total number of rows in the table using database statistics (O(1)).\n\
                          /// WARNING (MySQL): For InnoDB tables, this value is an estimate and can vary significantly from the actual count.\n\
                          pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = {db}>>(executor: E) -> sqlx::Result<u64> {{\n\
@@ -1935,7 +1939,7 @@ impl DaoGenerator {
                 ).unwrap();
             } else {
                 if table.config.is_view {
-                    write!(&mut code, 
+                    write!(&mut code,
                         "    /// Returns an approximate total number of rows in the view.\n\
                              /// (SQLite views do not support O(1) approximation, so this falls back to COUNT(*)).\n\
                              #[deprecated(since = \"0.2.0\", note = \"SQLite views fallback to COUNT(*). Avoid using this to prevent full table scans.\")]\n\
@@ -1946,7 +1950,7 @@ impl DaoGenerator {
                         db = db_type,
                     ).unwrap();
                 } else {
-                    write!(&mut code, 
+                    write!(&mut code,
                         "    /// Returns an estimated count upper bound using `MAX(rowid)` (O(1)).\n\
                               /// WARNING (SQLite): This overestimates the count if rows have been deleted.\n\
                               pub async fn estimated_count_upper_bound<'e, E: sqlx::Executor<'e, Database = {db}>>(executor: E) -> sqlx::Result<u64> {{\n\
@@ -1986,7 +1990,7 @@ impl DaoGenerator {
             };
 
             // stream_all
-            write!(&mut code, 
+            write!(&mut code,
                 "    /// Streams rows from the table, ordered by the primary key.\n\
                      /// **⚠️ Performance Warning:** Streaming a whole table without a limit or timeout can cause connection pool starvation.\n\
                      /// A `limit` parameter is now mandatory to prevent Unbounded Streaming DoS. Timeouts are managed by the underlying sqlx `AnyPoolOptions` settings.\n\
@@ -2041,7 +2045,7 @@ impl DaoGenerator {
                 let pk_binds_str = pk_binds.join("");
 
                 // get_by_pk
-                write!(&mut code, 
+                write!(&mut code,
                     "    pub async fn get_by_{sfx}<'e, E: sqlx::Executor<'e, Database = {db}>>(executor: E, {args}) -> sqlx::Result<Option<Self>> {{\n\
                              let query = r#\"SELECT {cols} FROM {tbl} WHERE {wh}\"#;\n\
                              sqlx::query_as::<_, Self>(query){binds}.fetch_optional(executor).await\n\
@@ -2051,7 +2055,7 @@ impl DaoGenerator {
                 ).unwrap();
 
                 // exists_by_pk
-                write!(&mut code, 
+                write!(&mut code,
                     "    pub async fn exists_by_{sfx}<'e, E: sqlx::Executor<'e, Database = {db}>>(executor: E, {args}) -> sqlx::Result<bool> {{\n\
                              let query = r#\"SELECT 1 FROM {tbl} WHERE {wh} LIMIT 1\"#;\n\
                              let exists: Option<(i32,)> = sqlx::query_as(query){binds}.fetch_optional(executor).await?;\n\
@@ -2072,7 +2076,7 @@ impl DaoGenerator {
                     };
                     let p1 = dialect.placeholder(1);
                     let p2 = dialect.placeholder(2);
-                    write!(&mut code, 
+                    write!(&mut code,
                         "    pub async fn list_by_cursor<'e, E: sqlx::Executor<'e, Database = {db}>>(executor: E, last_id: {cat}, limit: u32) -> sqlx::Result<Vec<Self>> {{\n\
                                  let limit = limit.clamp(1, 10000);\n\
                                  let query = r#\"SELECT {cols} FROM {tbl} WHERE {pk} > {p1} ORDER BY {pk} ASC LIMIT {p2}\"#;\n\
@@ -2126,7 +2130,7 @@ impl DaoGenerator {
                     )
                 };
 
-                write!(&mut code, 
+                write!(&mut code,
                     "    pub async fn insert_unchecked<'e, E: sqlx::Executor<'e, Database = {db}>>(&self, executor: E) -> sqlx::Result<u64> {{\n\
                              let query = r#\"{sql}\"#;\n",
                     db = db_type, sql = insert_sql,
@@ -2134,14 +2138,14 @@ impl DaoGenerator {
 
                 if auto_inc_col.is_some() {
                     if dialect == Dialect::Postgres {
-                        write!(&mut code, 
+                        write!(&mut code,
                             "        let (id,): (i64,) = sqlx::query_as(query){binds}.fetch_one(executor).await?;\n\
                                      Ok(id as u64)\n\
                                  }}\n\n",
                             binds = ins_binds_str,
                         ).unwrap();
                     } else {
-                        write!(&mut code, 
+                        write!(&mut code,
                             "        let result = sqlx::query::<{db}>(query){binds}.execute(executor).await?;\n\
                                      Ok({last})\n\
                                  }}\n\n",
@@ -2151,7 +2155,7 @@ impl DaoGenerator {
                         ).unwrap();
                     }
                 } else {
-                    write!(&mut code, 
+                    write!(&mut code,
                         "        let result = sqlx::query::<{db}>(query){binds}.execute(executor).await?;\n\
                                  Ok(result.rows_affected())\n\
                              }}\n\n",
@@ -2177,11 +2181,10 @@ impl DaoGenerator {
                     return Err(format!(
                         "Table '{}' has {} columns, exceeding max bind parameters {} for dialect {:?}",
                         table.name, col_count, max_params, dialect
-                    )
-                    .into());
+                    ));
                 }
                 if db_type == "sqlx::Postgres" {
-                    write!(&mut code, 
+                    write!(&mut code,
                         "    /// Inserts a batch of records using Postgres COPY (ultra-fast). \n\
                              /// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.\n\
                               pub async fn insert_batch<'e>(executor: &mut sqlx::Transaction<'e, {db}>, items: &[Self]) -> sqlx::Result<u64> {{\n\
@@ -2231,7 +2234,7 @@ impl DaoGenerator {
                         }
                     }
 
-                    write!(&mut code, 
+                    write!(&mut code,
                         "                                         s\n\
                                      }}).sum();\n\
                                      let mut payload = String::with_capacity(est);\n\
@@ -2270,7 +2273,7 @@ impl DaoGenerator {
                         if i > 0 {
                             code.push_str("                payload.push(',');\n");
                         }
-                        writeln!(&mut code, 
+                        writeln!(&mut code,
                             "                {}",
                             val_expr
                         ).unwrap();
@@ -2295,7 +2298,7 @@ impl DaoGenerator {
                              }\n\n",
                     );
                 } else {
-                    write!(&mut code, 
+                    write!(&mut code,
                         "    /// Inserts a batch of records. \n\
                              /// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.\n\
                              pub async fn insert_batch<'e>(executor: &mut sqlx::Transaction<'e, {db}>, items: &[Self]) -> sqlx::Result<u64> {{\n\
@@ -2313,7 +2316,7 @@ impl DaoGenerator {
                         db = db_type, tbl = sql_table_q, cols = ins_cols_str, col_count = col_count, max_params = max_params
                     ).unwrap();
                     for (n, _) in &insert_cols {
-                        writeln!(&mut code, 
+                        writeln!(&mut code,
                             "            b.push_bind(&item.{});",
                             Self::escape_rust_keyword(n)
                         ).unwrap();
@@ -2357,7 +2360,7 @@ impl DaoGenerator {
                         sql_table_q, upsert_cols_str, upsert_phs_str, suffix
                     );
 
-                    write!(&mut code, 
+                    write!(&mut code,
                         "    pub async fn upsert_unchecked<'e, E: sqlx::Executor<'e, Database = {db}>>(&self, executor: E) -> sqlx::Result<u64> {{\n\
                                  let query = r#\"{sql}\"#;\n\
                                  let result = sqlx::query::<{db}>(query){binds}.execute(executor).await?;\n\
@@ -2376,7 +2379,7 @@ impl DaoGenerator {
                         db = db_type
                     ).unwrap();
 
-                    write!(&mut code, 
+                    write!(&mut code,
                         "    /// Upserts a batch of records. \n\
                              /// WARNING: To guarantee atomicity across all chunks, you MUST pass an explicit `sqlx::Transaction` as the `executor`.\n\
                              pub async fn upsert_batch<'e>(executor: &mut sqlx::Transaction<'e, {db}>, items: &[Self]) -> sqlx::Result<u64> {{\n\
@@ -2394,12 +2397,12 @@ impl DaoGenerator {
                         db = db_type, tbl = sql_table_q, cols = ins_cols_str, col_count = col_count, max_params = max_params
                     ).unwrap();
                     for (n, _) in &insert_cols {
-                        writeln!(&mut code, 
+                        writeln!(&mut code,
                             "            b.push_bind(&item.{});",
                             Self::escape_rust_keyword(n)
                         ).unwrap();
                     }
-                    write!(&mut code, 
+                    write!(&mut code,
                         "            }});\n\
                                      qb.push(r#\"{suffix}\"#);\n\
                                      let result = qb.build().execute(&mut **executor).await?;\n\
@@ -2440,19 +2443,19 @@ impl DaoGenerator {
 
                     let mut bind_lines = String::new();
                     for (n, _) in &update_cols {
-                        writeln!(&mut bind_lines, 
+                        writeln!(&mut bind_lines,
                             "        query = query.bind(&self.{});",
                             Self::escape_rust_keyword(n)
                         ).unwrap();
                     }
                     for (n, _) in &pk_cols {
-                        writeln!(&mut bind_lines, 
+                        writeln!(&mut bind_lines,
                             "        query = query.bind(&self.{});",
                             Self::escape_rust_keyword(n)
                         ).unwrap();
                     }
 
-                    write!(&mut code, 
+                    write!(&mut code,
                         "    pub async fn update_unchecked_by_{sfx}<'e, E: sqlx::Executor<'e, Database = {db}>>(&self, executor: E) -> sqlx::Result<u64> {{\n\
                                  let query_str = r#\"UPDATE {tbl} SET {set} WHERE {wh}\"#;\n\
                                  let mut query = sqlx::query::<{db}>(query_str);\n\
@@ -2505,7 +2508,7 @@ impl DaoGenerator {
                         .map(|(n, _)| format!(".bind({})", Self::escape_rust_keyword(n)))
                         .collect();
 
-                    write!(&mut code, 
+                    write!(&mut code,
                         "    pub async fn delete_by_{sfx}<'e, E: sqlx::Executor<'e, Database = {db}>>(executor: E, {args}) -> sqlx::Result<u64> {{\n\
                                  let query = r#\"DELETE FROM {tbl} WHERE {wh}\"#;\n\
                                  let result = sqlx::query::<{db}>(query){binds}.execute(executor).await?;\n\
@@ -2525,7 +2528,7 @@ impl DaoGenerator {
                             other => other,
                         };
                         let base_chunk = if id_type == "String" || id_type == "Vec<u8>" { 500 } else { 5000 };
-                        write!(&mut code, 
+                        write!(&mut code,
                             "    pub async fn delete_many_by_{sfx}<'e>(executor: &mut sqlx::Transaction<'e, {db}>, ids: &[{idt}]) -> sqlx::Result<u64> {{\n\
                                      if ids.is_empty() {{ return Ok(0); }}\n\
                                      let mut total_affected = 0;\n\
@@ -2555,9 +2558,9 @@ impl DaoGenerator {
                         "Table '{}': {} update columns exceeds the 10-column limit for update_partial_by_id. \
                          Consider splitting the table or using update_by_{} instead.",
                         table.name, update_cols.len(), pk_suffix
-                    ).into());
+                    ));
                 }
-                
+
                 let patch_name = format!("{}Patch", struct_name);
                 let pk_args: Vec<String> = pk_cols
                     .iter()
@@ -2573,7 +2576,7 @@ impl DaoGenerator {
                     .collect();
 
                 let tbl_escaped = sql_table_q.replace('"', "\\\"");
-                write!(&mut code, 
+                write!(&mut code,
                     "    #[allow(unused_assignments, unused_comparisons, unused_mut, unused_variables)]\n\
                          pub async fn update_partial_by_{sfx}<'e, E: sqlx::Executor<'e, Database = {db}>>(executor: E, {args}, patch: &{patch}) -> sqlx::Result<u64> {{\n\
                              let mut errors: Vec<String> = Vec::new();\n",
@@ -2585,21 +2588,21 @@ impl DaoGenerator {
                     let field = Self::escape_rust_keyword(n);
                     let is_opt = col_meta.is_optional.value();
                     let ty = col_meta.rust_type_resolved();
-                    
-                    write!(&mut code, "                             if let Some(val) = &patch.{field} {{\n").unwrap();
+
+                    writeln!(&mut code, "                             if let Some(val) = &patch.{field} {{").unwrap();
                     let val_ref = if is_opt { "v" } else { "val" };
                     if is_opt {
-                        write!(&mut code, "                                 if let Some(v) = val.as_ref() {{\n").unwrap();
+                        writeln!(&mut code, "                                 if let Some(v) = val.as_ref() {{").unwrap();
                     }
-                    
+
                     if ty == "String" || ty == "Vec<u8>" {
                         if let Some(prop) = &col_meta.min_length {
                             let min = prop.value();
-                            if min > 0 { write!(&mut code, "                                     if {val_ref}.len() < {min} {{ errors.push(\"{field}: min_length {min} not met\".into()); }}\n").unwrap(); }
+                            if min > 0 { writeln!(&mut code, "                                     if {val_ref}.len() < {min} {{ errors.push(\"{field}: min_length {min} not met\".into()); }}").unwrap(); }
                         }
                         if let Some(prop) = &col_meta.max_length {
                             let max = prop.value();
-                            write!(&mut code, "                                     if {val_ref}.len() > {max} {{ errors.push(\"{field}: exceeds max_length {max}\".into()); }}\n").unwrap();
+                            writeln!(&mut code, "                                     if {val_ref}.len() > {max} {{ errors.push(\"{field}: exceeds max_length {max}\".into()); }}").unwrap();
                         }
                     }
 
@@ -2622,25 +2625,25 @@ impl DaoGenerator {
 
                     if ty != "String" && ty != "Vec<u8>" && ty != "bool" && ty != "serde_json::Value" && !ty.starts_with("chrono::") {
                         if ty == "f32" || ty == "f64" {
-                            write!(&mut code, "                                     if !{val_ref}.is_finite() {{ errors.push(\"{field}: value must be finite (NaN/Infinity rejected)\".into()); }}\n").unwrap();
+                            writeln!(&mut code, "                                     if !{val_ref}.is_finite() {{ errors.push(\"{field}: value must be finite (NaN/Infinity rejected)\".into()); }}").unwrap();
                         }
                         if let Some(prop) = &col_meta.min_value {
                             let min = prop.value();
                             let cast = if ty == "f32" || ty == "f64" { "f64" } else { "i128" };
-                            write!(&mut code, "                                     if (*{val_ref} as {cast}) < ({min} as {cast}) {{ errors.push(\"{field}: minimum value '{min}' not met\".into()); }}\n").unwrap();
+                            writeln!(&mut code, "                                     if (*{val_ref} as {cast}) < ({min} as {cast}) {{ errors.push(\"{field}: minimum value '{min}' not met\".into()); }}").unwrap();
                         }
                         if let Some(prop) = &col_meta.max_value {
                             let max = prop.value();
                             let cast = if ty == "f32" || ty == "f64" { "f64" } else { "i128" };
-                            write!(&mut code, "                                     if (*{val_ref} as {cast}) > ({max} as {cast}) {{ errors.push(\"{field}: exceeds max_value '{max}'\".into()); }}\n").unwrap();
+                            writeln!(&mut code, "                                     if (*{val_ref} as {cast}) > ({max} as {cast}) {{ errors.push(\"{field}: exceeds max_value '{max}'\".into()); }}").unwrap();
                         }
                     }
 
-                    if is_opt { write!(&mut code, "                                 }}\n").unwrap(); }
-                    write!(&mut code, "                             }}\n").unwrap();
+                    if is_opt { writeln!(&mut code, "                                 }}").unwrap(); }
+                    writeln!(&mut code, "                             }}").unwrap();
                 }
 
-                write!(&mut code, 
+                write!(&mut code,
                     "                             if !errors.is_empty() {{\n\
                                                       return Err(sqlx::Error::Protocol(errors.join(\", \").into()));\n\
                                                   }}\n\
@@ -2652,7 +2655,7 @@ impl DaoGenerator {
                 for (n, _) in update_cols.iter() {
                     let field = Self::escape_rust_keyword(n);
                     let col_q = dialect.quote_ident(n).replace('"', "\\\"");
-                    write!(&mut code, 
+                    write!(&mut code,
                         "        if let Some(val) = &patch.{f} {{\n\
                                      if !first {{ qb.push(\", \"); }}\n\
                                      qb.push(\"{col} = \");\n\
@@ -2663,14 +2666,14 @@ impl DaoGenerator {
                     ).unwrap();
                 }
 
-                write!(&mut code, 
-                    "        if first {{ return Ok(0); }}\n"
+                writeln!(&mut code,
+                    "        if first {{ return Ok(0); }}"
                 ).unwrap();
 
                 for (i, (n, _)) in pk_cols.iter().enumerate() {
                     let col_q = dialect.quote_ident(n).replace('"', "\\\"");
                     let conj = if i == 0 { " WHERE " } else { " AND " };
-                    write!(&mut code, 
+                    write!(&mut code,
                         "        qb.push(\"{conj}{col} = \");\n\
                                  qb.push_bind({f});\n",
                         conj = conj, col = col_q,
@@ -2678,7 +2681,7 @@ impl DaoGenerator {
                     ).unwrap();
                 }
 
-                write!(&mut code, 
+                write!(&mut code,
                     "        let result = qb.build().execute(executor).await?;\n\
                              Ok(result.rows_affected())\n\
                          }}\n\n"
@@ -2737,7 +2740,7 @@ impl DaoGenerator {
 
                 if index.is_unique {
                     // get_by (unique → Option)
-                    write!(&mut code, 
+                    write!(&mut code,
                         "    pub async fn get_by_{sfx}<'e, E: sqlx::Executor<'e, Database = {db}>>(executor: E, {args}) -> sqlx::Result<Option<Self>> {{\n\
                                  let query = r#\"SELECT {cols} FROM {tbl} WHERE {wh}\"#;\n\
                                  sqlx::query_as::<_, Self>(query){binds}.fetch_optional(executor).await\n\
@@ -2747,7 +2750,7 @@ impl DaoGenerator {
                     ).unwrap();
                 } else {
                     // list_by (non-unique → Vec)
-                    write!(&mut code, 
+                    write!(&mut code,
                         "    pub async fn list_by_{sfx}<'e, E: sqlx::Executor<'e, Database = {db}>>(executor: E, {args}, limit: i64) -> sqlx::Result<Vec<Self>> {{\n\
                                  let limit = limit.clamp(1, 10000);\n\
                                  let query = r#\"SELECT {cols} FROM {tbl} WHERE {wh} {order} LIMIT {lph}\"#;\n\
@@ -2762,7 +2765,7 @@ impl DaoGenerator {
                     let stream_args_str = args_str
                         .replace("&str", "&'e str")
                         .replace("&[u8]", "&'e [u8]");
-                    write!(&mut code, 
+                    write!(&mut code,
                         "    /// Streams rows from the table, filtered by {sfx}.\n\
                                  /// **⚠️ Performance Warning:** Unbounded streaming is potentially dangerous.\n\
                                  /// A `limit` parameter is now mandatory to prevent connection pool starvation. Timeouts are managed by the underlying sqlx `AnyPoolOptions` settings.\n\
@@ -2780,7 +2783,7 @@ impl DaoGenerator {
                 }
 
                 // exists_by
-                write!(&mut code, 
+                write!(&mut code,
                     "    pub async fn exists_by_{sfx}<'e, E: sqlx::Executor<'e, Database = {db}>>(executor: E, {args}) -> sqlx::Result<bool> {{\n\
                              let query = r#\"SELECT 1 FROM {tbl} WHERE {wh} LIMIT 1\"#;\n\
                              let exists: Option<(i32,)> = sqlx::query_as(query){binds}.fetch_optional(executor).await?;\n\
@@ -2792,7 +2795,7 @@ impl DaoGenerator {
 
                 // delete_by (non-view)
                 if !table.config.is_view {
-                    write!(&mut code, 
+                    write!(&mut code,
                         "    pub async fn delete_by_{sfx}<'e, E: sqlx::Executor<'e, Database = {db}>>(executor: E, {args}) -> sqlx::Result<u64> {{\n\
                                  let query = r#\"DELETE FROM {tbl} WHERE {wh}\"#;\n\
                                  let result = sqlx::query::<{db}>(query){binds}.execute(executor).await?;\n\
@@ -2808,7 +2811,7 @@ impl DaoGenerator {
 
             if !table.config.is_view && !pk_cols.is_empty() && !update_cols.is_empty() {
                 let patch_name = format!("{}Patch", struct_name);
-                write!(&mut code, 
+                write!(&mut code,
                     "#[allow(clippy::all)]\n#[derive(Debug, Clone, Default)]\npub struct {} {{\n",
                     patch_name
                 ).unwrap();
@@ -2819,7 +2822,7 @@ impl DaoGenerator {
                     } else {
                         raw
                     };
-                    writeln!(&mut code, 
+                    writeln!(&mut code,
                         "    pub {}: Option<{}>,",
                         Self::escape_rust_keyword(n),
                         inner
@@ -2831,7 +2834,7 @@ impl DaoGenerator {
             let file_name = format!("{}.rs", table.name);
             let table_file = out_path.join(&file_name);
             let changed = write_if_changed(&table_file, &code).map_err(|e| e.to_string())?;
-            
+
             let mod_ident = Self::escape_rust_keyword(&table.name);
             let m1 = format!("pub mod {};\n", mod_ident);
             let m2 = format!("pub use {}::*;\n", mod_ident);
@@ -2862,12 +2865,12 @@ impl DaoGenerator {
         }
         if let Ok(entries) = fs::read_dir(out_path) {
             for entry in entries.flatten() {
-                if let Ok(ft) = entry.file_type() {
-                    if ft.is_file() {
-                        let name = entry.file_name().to_string_lossy().to_string();
-                        if name.ends_with(".rs") && !expected_files.contains(&name) {
-                            let _ = fs::remove_file(entry.path());
-                        }
+                if let Ok(ft) = entry.file_type()
+                    && ft.is_file()
+                {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if name.ends_with(".rs") && !expected_files.contains(&name) {
+                        let _ = fs::remove_file(entry.path());
                     }
                 }
             }

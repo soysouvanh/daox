@@ -4,9 +4,6 @@ pub mod models_mysql;
 pub mod models_pg;
 pub mod models_sqlite;
 
-#[cfg(test)]
-mod security_tests;
-
 use sqlx::mysql::MySqlPoolOptions;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::sqlite::SqlitePoolOptions;
@@ -263,7 +260,7 @@ async fn run_postgres() -> Result<(), sqlx::Error> {
             raw_data: Some(test_payload.clone()),
         };
         let mut tx = pool.begin().await?;
-        models_pg::ProductMetadata::insert_batch(&mut tx, &[pm.clone()])
+        models_pg::ProductMetadata::insert_batch(&mut tx, std::slice::from_ref(&pm))
             .await
             .unwrap();
         tx.commit().await?;
