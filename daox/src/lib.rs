@@ -1931,8 +1931,8 @@ impl DaoGenerator {
                          /// WARNING (MySQL): For InnoDB tables, this value is an estimate and can vary significantly from the actual count.\n\
                          pub async fn approximate_count<'e, E: sqlx::Executor<'e, Database = {db}>>(executor: E) -> sqlx::Result<u64> {{\n\
                              let query = r#\"SELECT table_rows FROM information_schema.tables WHERE table_name = ? AND table_schema = DATABASE()\"#;\n\
-                             let count: Option<(i64,)> = sqlx::query_as(query).bind(\"{tbl}\").fetch_optional(executor).await?;\n\
-                             Ok(count.map(|(c,)| c.max(0) as u64).unwrap_or(0))\n\
+                             let count: Option<(u64,)> = sqlx::query_as(query).bind(\"{tbl}\").fetch_optional(executor).await?;\n\
+                             Ok(count.map(|(c,)| c).unwrap_or(0))\n\
                          }}\n\n",
                     db = db_type,
                     tbl = sql_table,
@@ -2253,9 +2253,9 @@ impl DaoGenerator {
                             }
                             "chrono::DateTime<chrono::Utc>"
                             | "chrono::NaiveDate"
-                            | "chrono::NaiveDateTime" => "write!(&mut payload, \"\\\"{}\\\"\", v).unwrap();",
+                            | "chrono::NaiveDateTime" => "write!(&mut payload, \"\\\"{}\\\"\", v).map_err(|e| sqlx::Error::Protocol(e.to_string().into()))?;",
                             "Vec<u8>" => {
-                                r#"payload.push_str("\"\\x"); for b in v { write!(&mut payload, "{:02x}", b).unwrap(); } payload.push('"');"#
+                                r#"payload.push_str("\"\\x"); for b in v { write!(&mut payload, "{:02x}", b).map_err(|e| sqlx::Error::Protocol(e.to_string().into()))?; } payload.push('"');"#
                             }
                             "serde_json::Value" => {
                                 r#"let json_str = v.to_string(); payload.push('"'); for c in json_str.chars() { if c == '"' { payload.push_str("\"\""); } else { payload.push(c); } } payload.push('"');"#
@@ -2263,7 +2263,7 @@ impl DaoGenerator {
                             "bool" => {
                                 "if *v { payload.push_str(\"true\"); } else { payload.push_str(\"false\"); }"
                             }
-                            _ => "write!(&mut payload, \"{}\", v).unwrap();", // Numeric
+                            _ => "write!(&mut payload, \"{}\", v).map_err(|e| sqlx::Error::Protocol(e.to_string().into()))?;", // Numeric
                         };
                         let val_expr = if is_opt {
                             format!("if let Some(v) = &item.{} {{ {} }}", field, write_stmt)

@@ -156,11 +156,11 @@ impl Configurations {
         executor: E,
     ) -> sqlx::Result<u64> {
         let query = r#"SELECT table_rows FROM information_schema.tables WHERE table_name = ? AND table_schema = DATABASE()"#;
-        let count: Option<(i64,)> = sqlx::query_as(query)
+        let count: Option<(u64,)> = sqlx::query_as(query)
             .bind("configurations")
             .fetch_optional(executor)
             .await?;
-        Ok(count.map(|(c,)| c.max(0) as u64).unwrap_or(0))
+        Ok(count.map(|(c,)| c).unwrap_or(0))
     }
 
     /// Streams rows from the table, ordered by the primary key.

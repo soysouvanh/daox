@@ -326,7 +326,8 @@ impl Users {
             use std::fmt::Write;
             for item in chunk {
                 if let Some(v) = &item.created_at {
-                    write!(&mut payload, "\"{}\"", v).unwrap();
+                    write!(&mut payload, "\"{}\"", v)
+                        .map_err(|e| sqlx::Error::Protocol(e.to_string().into()))?;
                 }
                 payload.push(',');
                 {

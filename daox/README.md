@@ -67,7 +67,7 @@ tokio = { version = "1", features = ["full"] }
 
 [build-dependencies]
 # Daox is our magical tool that generates code for you before the app starts
-daox = "0.2.5"
+daox = "0.2.7"
 # tokio is also needed for the code generation script
 tokio = { version = "1", features = ["full"] }
 ```

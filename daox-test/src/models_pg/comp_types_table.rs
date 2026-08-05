@@ -310,19 +310,23 @@ impl CompTypesTable {
                 }
                 payload.push(',');
                 if let Some(v) = &item.f_decimal {
-                    write!(&mut payload, "{}", v).unwrap();
+                    write!(&mut payload, "{}", v)
+                        .map_err(|e| sqlx::Error::Protocol(e.to_string().into()))?;
                 }
                 payload.push(',');
                 if let Some(v) = &item.f_double {
-                    write!(&mut payload, "{}", v).unwrap();
+                    write!(&mut payload, "{}", v)
+                        .map_err(|e| sqlx::Error::Protocol(e.to_string().into()))?;
                 }
                 payload.push(',');
                 if let Some(v) = &item.f_float {
-                    write!(&mut payload, "{}", v).unwrap();
+                    write!(&mut payload, "{}", v)
+                        .map_err(|e| sqlx::Error::Protocol(e.to_string().into()))?;
                 }
                 payload.push(',');
                 if let Some(v) = &item.f_int {
-                    write!(&mut payload, "{}", v).unwrap();
+                    write!(&mut payload, "{}", v)
+                        .map_err(|e| sqlx::Error::Protocol(e.to_string().into()))?;
                 }
                 payload.push(',');
                 if let Some(v) = &item.f_text {

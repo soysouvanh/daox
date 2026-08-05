@@ -323,7 +323,7 @@ dependencies = [
 
 [[package]]
 name = "daox"
-version = "0.2.8"
+version = "0.2.7"
 dependencies = [
  "rayon",
  "regex",
@@ -335,7 +335,7 @@ dependencies = [
 
 [[package]]
 name = "daox-test"
-version = "0.2.8"
+version = "0.2.7"
 dependencies = [
  "chrono",
  "daox",

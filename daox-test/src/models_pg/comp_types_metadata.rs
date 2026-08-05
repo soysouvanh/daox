@@ -246,23 +246,27 @@ impl CompTypesMetadata {
             for item in chunk {
                 {
                     let v = &item.comp_types_id;
-                    write!(&mut payload, "{}", v).unwrap();
+                    write!(&mut payload, "{}", v)
+                        .map_err(|e| sqlx::Error::Protocol(e.to_string().into()))?;
                 }
                 payload.push(',');
                 if let Some(v) = &item.f_blob {
                     payload.push_str("\"\\x");
                     for b in v {
-                        write!(&mut payload, "{:02x}", b).unwrap();
+                        write!(&mut payload, "{:02x}", b)
+                            .map_err(|e| sqlx::Error::Protocol(e.to_string().into()))?;
                     }
                     payload.push('"');
                 }
                 payload.push(',');
                 if let Some(v) = &item.f_date {
-                    write!(&mut payload, "\"{}\"", v).unwrap();
+                    write!(&mut payload, "\"{}\"", v)
+                        .map_err(|e| sqlx::Error::Protocol(e.to_string().into()))?;
                 }
                 payload.push(',');
                 if let Some(v) = &item.f_datetime {
-                    write!(&mut payload, "\"{}\"", v).unwrap();
+                    write!(&mut payload, "\"{}\"", v)
+                        .map_err(|e| sqlx::Error::Protocol(e.to_string().into()))?;
                 }
                 payload.push(',');
                 if let Some(v) = &item.f_json {
@@ -279,7 +283,8 @@ impl CompTypesMetadata {
                 }
                 payload.push(',');
                 if let Some(v) = &item.f_timestamp {
-                    write!(&mut payload, "\"{}\"", v).unwrap();
+                    write!(&mut payload, "\"{}\"", v)
+                        .map_err(|e| sqlx::Error::Protocol(e.to_string().into()))?;
                 }
                 payload.push('\n');
                 const MAX_COPY_VALUE_SIZE: usize = 100 * 1024 * 1024;

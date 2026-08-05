@@ -227,17 +227,20 @@ impl OrderItems {
             for item in chunk {
                 {
                     let v = &item.order_id;
-                    write!(&mut payload, "{}", v).unwrap();
+                    write!(&mut payload, "{}", v)
+                        .map_err(|e| sqlx::Error::Protocol(e.to_string().into()))?;
                 }
                 payload.push(',');
                 {
                     let v = &item.product_id;
-                    write!(&mut payload, "{}", v).unwrap();
+                    write!(&mut payload, "{}", v)
+                        .map_err(|e| sqlx::Error::Protocol(e.to_string().into()))?;
                 }
                 payload.push(',');
                 {
                     let v = &item.quantity;
-                    write!(&mut payload, "{}", v).unwrap();
+                    write!(&mut payload, "{}", v)
+                        .map_err(|e| sqlx::Error::Protocol(e.to_string().into()))?;
                 }
                 payload.push('\n');
                 const MAX_COPY_VALUE_SIZE: usize = 100 * 1024 * 1024;

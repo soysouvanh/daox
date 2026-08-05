@@ -290,7 +290,8 @@ impl ProductMetadata {
                 if let Some(v) = &item.raw_data {
                     payload.push_str("\"\\x");
                     for b in v {
-                        write!(&mut payload, "{:02x}", b).unwrap();
+                        write!(&mut payload, "{:02x}", b)
+                            .map_err(|e| sqlx::Error::Protocol(e.to_string().into()))?;
                     }
                     payload.push('"');
                 }
