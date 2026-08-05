@@ -18,11 +18,21 @@ sqlite = ["sqlx/sqlite"]
 
 [dependencies]
 # Database introspection (MySQL/MariaDB, PostgreSQL, SQLite)
-sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "any"] }
-tokio = { version = "1", features = ["rt-multi-thread", "time", "fs", "net", "macros"] }
+sqlx = { version = ">=0.9, <0.10", features = [
+    "runtime-tokio",
+    "tls-rustls",
+    "any",
+] }
+tokio = { version = ">=1.38, <2", features = [
+    "rt-multi-thread",
+    "time",
+    "fs",
+    "net",
+    "macros",
+] }
 
 # Minimal dependencies (SOTA)
-toml = "0.8.23"
-serde = { version = "1.0", features = ["derive"] }
-regex = "1"
-rayon = "1"
+toml = ">=0.8.23, <0.9"
+serde = { version = ">=1.0.200, <2", features = ["derive"] }
+regex = ">=1.10, <2"
+rayon = ">=1.10, <2"

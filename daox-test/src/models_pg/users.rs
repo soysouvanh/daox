@@ -1,3 +1,9 @@
+#[cfg(not(feature = "validation"))]
+compile_error!(
+    "Daox: the 'validation' feature is disabled. \
+     Format regex checks in validate() will be skipped. \
+     Enable with: features = [\"validation\"]"
+);
 #[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Users {
@@ -672,41 +678,6 @@ impl Users {
         Ok(result.rows_affected())
     }
 
-    pub async fn get_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
-        executor: E,
-        email: &str,
-    ) -> sqlx::Result<Option<Self>> {
-        let query = r#"SELECT "created_at", "email", "first_name", "id", "last_name", "status" FROM "users" WHERE "email" = $1"#;
-        sqlx::query_as::<_, Self>(query)
-            .bind(email)
-            .fetch_optional(executor)
-            .await
-    }
-
-    pub async fn exists_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
-        executor: E,
-        email: &str,
-    ) -> sqlx::Result<bool> {
-        let query = r#"SELECT 1 FROM "users" WHERE "email" = $1 LIMIT 1"#;
-        let exists: Option<(i32,)> = sqlx::query_as(query)
-            .bind(email)
-            .fetch_optional(executor)
-            .await?;
-        Ok(exists.is_some())
-    }
-
-    pub async fn delete_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
-        executor: E,
-        email: &str,
-    ) -> sqlx::Result<u64> {
-        let query = r#"DELETE FROM "users" WHERE "email" = $1"#;
-        let result = sqlx::query::<sqlx::Postgres>(query)
-            .bind(email)
-            .execute(executor)
-            .await?;
-        Ok(result.rows_affected())
-    }
-
     pub async fn list_by_first_name_and_last_name<
         'e,
         E: sqlx::Executor<'e, Database = sqlx::Postgres>,
@@ -780,6 +751,41 @@ impl Users {
         let result = sqlx::query::<sqlx::Postgres>(query)
             .bind(first_name)
             .bind(last_name)
+            .execute(executor)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn get_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+        executor: E,
+        email: &str,
+    ) -> sqlx::Result<Option<Self>> {
+        let query = r#"SELECT "created_at", "email", "first_name", "id", "last_name", "status" FROM "users" WHERE "email" = $1"#;
+        sqlx::query_as::<_, Self>(query)
+            .bind(email)
+            .fetch_optional(executor)
+            .await
+    }
+
+    pub async fn exists_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+        executor: E,
+        email: &str,
+    ) -> sqlx::Result<bool> {
+        let query = r#"SELECT 1 FROM "users" WHERE "email" = $1 LIMIT 1"#;
+        let exists: Option<(i32,)> = sqlx::query_as(query)
+            .bind(email)
+            .fetch_optional(executor)
+            .await?;
+        Ok(exists.is_some())
+    }
+
+    pub async fn delete_by_email<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+        executor: E,
+        email: &str,
+    ) -> sqlx::Result<u64> {
+        let query = r#"DELETE FROM "users" WHERE "email" = $1"#;
+        let result = sqlx::query::<sqlx::Postgres>(query)
+            .bind(email)
             .execute(executor)
             .await?;
         Ok(result.rows_affected())

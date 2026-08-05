@@ -1,3 +1,9 @@
+#[cfg(not(feature = "validation"))]
+compile_error!(
+    "Daox: the 'validation' feature is disabled. \
+     Format regex checks in validate() will be skipped. \
+     Enable with: features = [\"validation\"]"
+);
 #[allow(clippy::all)]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct CompTypesMetadata {
