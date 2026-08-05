@@ -30,14 +30,17 @@ fn validate_db_url(url: &str) -> Result<(), String> {
         || url.starts_with("postgres://")
         || url.starts_with("postgresql://")
         || url.starts_with("sqlite://");
-    if valid {
-        Ok(())
-    } else {
-        Err(format!(
+    if !valid {
+        return Err(format!(
             "Invalid database URL scheme (must start with mysql://, postgres://, or sqlite://): {}",
             url
-        ))
+        ));
     }
+    // Rejeter les caractères de contrôle
+    if url.chars().any(|c| c.is_control()) {
+        return Err("Database URL contains control characters".to_string());
+    }
+    Ok(())
 }
 
 #[tokio::main]

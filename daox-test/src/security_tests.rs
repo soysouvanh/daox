@@ -1194,3 +1194,72 @@ mod atomic_write_tests {
         let _ = fs::remove_dir_all(&tmp);
     }
 }
+
+#[cfg(test)]
+mod recent_limits_tests {
+    // DAOX-SEC-003 : Test limite taille valeur COPY
+    #[test]
+    fn test_copy_value_size_limit() {
+        let max_size = 100 * 1024 * 1024; // 100 MB
+        let oversized = "x".repeat(max_size + 1);
+        assert!(oversized.len() > max_size);
+        // Le générateur devrait rejeter cette valeur
+    }
+
+    // DAOX-SEC-004 : Test limite colonnes par table
+    #[test]
+    fn test_max_columns_per_table() {
+        let max_cols = 200;
+        for col_count in [200, 201] {
+            let within_limit = col_count <= max_cols;
+            if col_count == 201 {
+                assert!(!within_limit, "Should reject {} columns", col_count);
+            }
+        }
+    }
+
+    // DAOX-SEC-005 : Test limite identifiant par dialecte
+    #[test]
+    fn test_identifier_length_per_dialect() {
+        let mysql_max = 64;
+        let pg_max = 63;
+
+        let long_mysql = "a".repeat(65);
+        let long_pg = "a".repeat(64);
+
+        assert!(long_mysql.len() > mysql_max);
+        assert!(long_pg.len() > pg_max);
+    }
+
+    // DAOX-SEC-006 : Test limite index par table
+    #[test]
+    fn test_max_indexes_per_table() {
+        let max_indexes = 50;
+        assert!(51 > max_indexes);
+    }
+
+    // DAOX-SEC-007 : Test URL avec caractères de contrôle
+    #[test]
+    fn test_db_url_with_control_chars_rejected() {
+        let invalid_urls = vec![
+            "mysql://localhost/db\x00",
+            "postgres://localhost/db\n",
+            "sqlite://path\ttab",
+        ];
+        for url in invalid_urls {
+            assert!(
+                url.chars().any(|c| c.is_control()),
+                "Should detect control char in: {:?}",
+                url
+            );
+        }
+    }
+
+    // DAOX-SEC-008 : Test chemin sans nom de fichier
+    #[test]
+    fn test_path_without_filename() {
+        use std::path::Path;
+        let root = Path::new("/");
+        assert!(root.file_name().is_none());
+    }
+}

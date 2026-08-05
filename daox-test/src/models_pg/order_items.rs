@@ -234,6 +234,16 @@ impl OrderItems {
                     write!(&mut payload, "{}", v).unwrap();
                 }
                 payload.push('\n');
+                const MAX_COPY_VALUE_SIZE: usize = 100 * 1024 * 1024;
+                if payload.len() > MAX_COPY_VALUE_SIZE {
+                    return Err(sqlx::Error::Protocol(
+                        format!(
+                            "COPY payload exceeds {} bytes limit per chunk",
+                            MAX_COPY_VALUE_SIZE
+                        )
+                        .into(),
+                    ));
+                }
                 if payload.len() > 10 * 1024 * 1024 {
                     {
                         copy_in.send(payload.as_bytes()).await?;
