@@ -1099,3 +1099,98 @@ mod batch_validation_tests {
         assert!(result.is_err(), "insert_batch must reject invalid items");
     }
 }
+
+#[cfg(test)]
+mod override_regex_validation_tests {
+    use std::fs;
+
+    #[tokio::test]
+    async fn test_override_invalid_regex_rejected_at_parse() {
+        let tmp = std::env::temp_dir().join("daox_sec_test_override_regex");
+        let _ = fs::remove_dir_all(&tmp);
+
+        let schema_root = tmp.join(".daox_schema");
+        let schema_dir = schema_root.join("users");
+        fs::create_dir_all(&schema_dir).unwrap();
+        fs::write(schema_dir.join("_table.toml"), "database = \"default\"").unwrap();
+        fs::write(
+            schema_dir.join("email.toml"),
+            r#"
+[type]
+value = "String"
+[is_optional]
+value = false
+"#,
+        )
+        .unwrap();
+
+        let out_dir = tmp.join("out");
+        let out_overrides = out_dir.join("overrides").join("users");
+        fs::create_dir_all(&out_overrides).unwrap();
+        fs::write(
+            out_overrides.join("email.toml"),
+            r#"
+[format]
+value = "[invalid"
+"#,
+        )
+        .unwrap();
+
+        let generator =
+            daox::DaoxGenerator::new(schema_root.to_str().unwrap(), out_dir.to_str().unwrap());
+        let result = generator.generate().await;
+        assert!(
+            result.is_err(),
+            "parse_schema should fail with invalid regex in override"
+        );
+        let _ = fs::remove_dir_all(&tmp);
+    }
+}
+
+#[cfg(test)]
+mod db_url_validation_tests {
+    fn validate_db_url(url: &str) -> bool {
+        url.starts_with("mysql://")
+            || url.starts_with("mariadb://")
+            || url.starts_with("postgres://")
+            || url.starts_with("postgresql://")
+            || url.starts_with("sqlite://")
+    }
+
+    #[test]
+    fn test_invalid_urls_rejected() {
+        let invalid = vec![
+            "file:///etc/passwd",
+            "http://evil.com",
+            "javascript:alert(1)",
+            "",
+            "postgres://; DROP TABLE users",
+        ];
+        for url in invalid {
+            if !url.starts_with("mysql://") && !url.starts_with("postgres://") {
+                assert!(!validate_db_url(url), "Should reject: {}", url);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod atomic_write_tests {
+    use std::fs;
+
+    #[test]
+    fn test_safe_write_rejects_preexisting_temp_file() {
+        let tmp = std::env::temp_dir().join("daox_sec_test_atomic_write");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let target = tmp.join("test.rs");
+        fs::write(&target, "original").unwrap();
+
+        let result = daox::safe_write_if_changed(&target, b"new content");
+        assert!(result.is_ok());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "new content");
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+}

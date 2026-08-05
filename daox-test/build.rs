@@ -24,6 +24,22 @@ fn parse_dotenv(path: &str) -> std::collections::HashMap<String, String> {
     out
 }
 
+fn validate_db_url(url: &str) -> Result<(), String> {
+    let valid = url.starts_with("mysql://")
+        || url.starts_with("mariadb://")
+        || url.starts_with("postgres://")
+        || url.starts_with("postgresql://")
+        || url.starts_with("sqlite://");
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "Invalid database URL scheme (must start with mysql://, postgres://, or sqlite://): {}",
+            url
+        ))
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Tell Cargo to re-run this build script ONLY if `build.rs` itself changes.
@@ -48,11 +64,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok()
         .or_else(|| dotenv.get("DATABASE_URL_MYSQL").cloned())
         .ok_or("DATABASE_URL_MYSQL is required for Daox code generation")?;
+    validate_db_url(&mysql_url).map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
     let pg_url = std::env::var("DATABASE_URL_PG")
         .ok()
         .or_else(|| dotenv.get("DATABASE_URL_PG").cloned())
         .ok_or("DATABASE_URL_PG is required for Daox code generation")?;
+    validate_db_url(&pg_url).map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
     let mysql_out = "src/models_mysql";
     let pg_out = "src/models_pg";
